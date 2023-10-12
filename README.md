@@ -14,5 +14,5 @@ https://github.com/bevyengine/bevy/blob/main/docs/linux_dependencies.md
 
 ```
 cargo build --release --target wasm32-unknown-unknown
-wasm-bindgen target/wasm32-unknown-unknown/release/bevy_visualizer.wasm --out-dir ./out/ --target web
+wasm-bindgen target/wasm32-unknown-unknown/release/bevy_visualizer.wasm --out-dir ./docs/ --target web
 ```
