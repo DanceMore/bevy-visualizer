@@ -3,16 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <title>Bevy Visualizer</title>
+    <style>
+        /* CSS for the button to float at the top of the screen */
+        #run-wasm {
+            position: fixed;
+            top: 10px; /* Adjust the value to control the distance from the top */
+            left: 10px; /* Adjust the value to control the distance from the left */
+        }
+    </style>
 </head>
 <body>
     <div id="bevy-app"></div>
+    <button id="run-wasm">Click to Run</button>
     <script type="module">
         // Import the generated JavaScript file
         import init from './bevy_visualizer.js';
+
         async function run() {
             await init();
         }
-        run();
+
+        // Add an event listener to run WebAssembly code when the button is clicked
+        const runButton = document.getElementById('run-wasm');
+        runButton.addEventListener('click', run);
     </script>
 </body>
 </html>
