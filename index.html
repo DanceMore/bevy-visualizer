@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bevy Visualizer</title>
+</head>
+<body>
+    <div id="bevy-app"></div>
+    <script type="module">
+        // Import the generated JavaScript file
+        import init from './out/bevy_visualizer.js';
+        async function run() {
+            await init();
+        }
+        run();
+    </script>
+</body>
+</html>
