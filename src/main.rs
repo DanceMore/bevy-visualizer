@@ -5,6 +5,9 @@ use rand::prelude::ThreadRng;
 use rand::Rng;
 use bevy::app::AppExit;
 
+use bevy_fundsp::prelude::*;
+
+
 fn main() {
     App::new()
         .init_resource::<Pause>()
@@ -15,10 +18,14 @@ fn main() {
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin::default(),
         ))
+        .add_plugins(DspPlugin::default())
+        .add_dsp_source(white_noise, SourceType::Dynamic)
+        .add_dsp_source(generate_sine_wave, SourceType::Dynamic)
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, spam_terminal)
 	.add_systems(Update, quit_on_escape)
+	.add_systems(PostStartup, play_sine_wave)
         .run();
 }
 
@@ -39,9 +46,13 @@ fn setup(mut commands: Commands) {
     ));
 }
 
+fn setup_audio(commands: &mut Commands) {
+    commands.insert_resource(DspManager::default());
+}
+
 fn draw_helptext(mut q: Query<&mut Terminal>) {
     for mut term in q.iter_mut() {
-		    let top = term.side_index(Side::Top) as i32;
+		    let top = term.side_index(bevy_ascii_terminal::Side::Top) as i32;
 		    term.clear_box([0, top], [30, 1]);
 		    term.put_string([0, top], "Press space to pause");
 		    term.clear_box([0, top-1], [30, 1]);
@@ -117,10 +128,11 @@ fn spam_terminal_c(time: Res<Time>, mut q: Query<&mut Terminal>) {
         for t in term.iter_mut() {
             let index = rng.gen_range(0..=255) as u8;
             let glyph = code_page_437::index_to_glyph(index);
+	    //let glyph = random_hiragana_char(&mut rng);
             let elapsed_time = time.elapsed_seconds();
             let hue = (elapsed_time * SHIFT_MULT) % 360.0;
-            let fg = Color::hsl(hue, 1.0, 0.5);
-            let bg = Color::BLACK;
+            let bg = Color::hsl(hue, 1.0, 0.5);
+            let fg = Color::BLACK;
 
             *t = Tile {
                 glyph,
@@ -173,4 +185,73 @@ fn quit_on_escape(
         // Send an exit event to quit the application
         exit_events.send(AppExit);
     }
+}
+
+//fn random_latin_char(rng: &mut impl Rng) -> char {
+//    // Define the Unicode range you want to select characters from
+//    // For example, this generates random characters from the basic Latin block
+//    let start = 0x0020 as u32; // Start of the basic Latin block
+//    let end = 0x007E as u32;   // End of the basic Latin block
+//
+//    // Generate a random Unicode code point within the specified range
+//    let code_point = rng.gen_range(start..=end);
+//
+//    // Convert the code point to a character
+//    char::from_u32(code_point).unwrap_or('?') // Handle invalid code points gracefully
+//}
+
+// bevy_ascii_term can't do unicode, only ascii (duh)
+//fn random_hiragana_char(rng: &mut impl Rng) -> char {
+//    // Define the Unicode range for Hiragana characters
+//    let start = 0x3040 as u32;
+//    let end = 0x309F as u32;
+//
+//    // Generate a random Unicode code point within the specified range
+//    let code_point = rng.gen_range(start..=end);
+//
+//    // Convert the code point to a character
+//    char::from_u32(code_point).unwrap_or('?') // Handle invalid code points gracefully
+//}
+
+fn white_noise() -> impl AudioUnit32 {
+    white() >> split::<U2>() * 0.2
+}
+
+fn play_noise(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<DspSource>>,
+    dsp_manager: Res<DspManager>,
+) {
+    let source = assets.add(
+        dsp_manager
+            .get_graph(white_noise)
+            .unwrap_or_else(|| panic!("DSP source not found!"))
+            .clone(),
+    );
+    commands.spawn(AudioSourceBundle {
+        source,
+        ..default()
+    });
+}
+
+fn generate_sine_wave() -> impl AudioUnit32 {
+    // Generate a sine wave at 440 Hz (A4)
+    sine_hz(440.0) * 0.2
+}
+
+fn play_sine_wave(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<DspSource>>,
+    dsp_manager: Res<DspManager>,
+) {
+    let source = assets.add(
+        dsp_manager
+            .get_graph(generate_sine_wave)
+            .unwrap_or_else(|| panic!("DSP source not found!"))
+            .clone(),
+    );
+    commands.spawn(AudioSourceBundle {
+        source,
+        ..default()
+    });
 }
