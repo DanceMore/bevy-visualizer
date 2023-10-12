@@ -1,65 +1,68 @@
-//! This example demonstrates Bevy's immediate mode drawing API intended for visual debugging.
-
-use std::f32::consts::PI;
-
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
+use bevy_ascii_terminal::{code_page_437, prelude::*};
+use rand::prelude::ThreadRng;
+use rand::Rng;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .init_resource::<Pause>()
+        .add_plugins((
+            DefaultPlugins,
+            TerminalPlugin,
+            LogDiagnosticsPlugin::default(),
+            FrameTimeDiagnosticsPlugin::default(),
+        ))
+        .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
-        .add_systems(Update, (system, update_config))
+        .add_systems(Update, spam_terminal)
         .run();
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn(Camera2dBundle::default());
-    // text
-    commands.spawn(TextBundle::from_section(
-        "Hold 'Left' or 'Right' to change the line width",
-        TextStyle {
-            font: asset_server.load("fonts/FiraMono-Medium.ttf"),
-            font_size: 24.,
-            color: Color::WHITE,
-        },
+#[derive(Resource, Default)]
+struct Pause(bool);
+
+fn setup(mut commands: Commands) {
+    commands.spawn((
+        TerminalBundle::new()
+            .with_size([80, 50])
+            .with_border(Border::single_line()),
+        AutoCamera,
     ));
 }
 
-fn system(mut gizmos: Gizmos, time: Res<Time>) {
-    let sin = time.elapsed_seconds().sin() * 50.;
-    gizmos.line_2d(Vec2::Y * -sin, Vec2::splat(-80.), Color::RED);
-    gizmos.ray_2d(Vec2::Y * sin, Vec2::splat(80.), Color::GREEN);
-
-    // Triangle
-    gizmos.linestrip_gradient_2d([
-        (Vec2::Y * 300., Color::BLUE),
-        (Vec2::new(-255., -155.), Color::RED),
-        (Vec2::new(255., -155.), Color::GREEN),
-        (Vec2::Y * 300., Color::BLUE),
-    ]);
-
-    gizmos.rect_2d(
-        Vec2::ZERO,
-        time.elapsed_seconds() / 3.,
-        Vec2::splat(300.),
-        Color::BLACK,
-    );
-
-    // The circles have 32 line-segments by default.
-    gizmos.circle_2d(Vec2::ZERO, 120., Color::BLACK);
-    // You may want to increase this for larger circles.
-    gizmos.circle_2d(Vec2::ZERO, 300., Color::NAVY).segments(64);
-
-    // Arcs default amount of segments is linerarly interpolated between
-    // 1 and 32, using the arc length as scalar.
-    gizmos.arc_2d(Vec2::ZERO, sin / 10., PI / 2., 350., Color::ORANGE_RED);
+fn rand_color(rng: &mut ThreadRng) -> Color {
+    let r: f32 = rng.gen_range(0.0..=1.0);
+    let g: f32 = rng.gen_range(0.0..=1.0);
+    let b: f32 = rng.gen_range(0.0..=1.0);
+    Color::rgb(r, g, b)
 }
 
-fn update_config(mut config: ResMut<GizmoConfig>, keyboard: Res<Input<KeyCode>>, time: Res<Time>) {
-    if keyboard.pressed(KeyCode::Right) {
-        config.line_width += 5. * time.delta_seconds();
+fn spam_terminal(keys: Res<Input<KeyCode>>, mut pause: ResMut<Pause>, mut q: Query<&mut Terminal>) {
+    if keys.just_pressed(KeyCode::Space) {
+        pause.0 = !pause.0;
     }
-    if keyboard.pressed(KeyCode::Left) {
-        config.line_width -= 5. * time.delta_seconds();
+
+    if pause.0 {
+        return;
+    }
+
+    let mut rng = rand::thread_rng();
+    for mut term in q.iter_mut() {
+        for t in term.iter_mut() {
+            let index = rng.gen_range(0..=255) as u8;
+            let glyph = code_page_437::index_to_glyph(index);
+            let fg = rand_color(&mut rng);
+            let bg = rand_color(&mut rng);
+
+            *t = Tile {
+                glyph,
+                fg_color: fg,
+                bg_color: bg,
+            }
+        }
+        let top = term.side_index(Side::Top) as i32;
+        term.clear_box([0, top], [25, 1]);
+        term.put_string([0, top], "Press space to pause");
     }
 }
