@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy_ascii_terminal::{code_page_437, prelude::*};
 use rand::prelude::ThreadRng;
 use rand::Rng;
+use bevy::app::AppExit;
 
 fn main() {
     App::new()
@@ -17,6 +18,7 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, spam_terminal)
+	.add_systems(Update, quit_on_escape)
         .run();
 }
 
@@ -54,7 +56,7 @@ fn rand_color(rng: &mut ThreadRng) -> Color {
     Color::rgb(r, g, b)
 }
 
-fn spam_terminal_a(mut q: Query<&mut Terminal>) {
+fn spam_terminal_a(_time: Res<Time>, mut q: Query<&mut Terminal>) {
     let mut rng = rand::thread_rng();
     for mut term in q.iter_mut() {
         for t in term.iter_mut() {
@@ -74,7 +76,7 @@ fn spam_terminal_a(mut q: Query<&mut Terminal>) {
     draw_helptext(q);
 }
 
-fn spam_terminal_b(mut q: Query<&mut Terminal>) {
+fn spam_terminal_b(_time: Res<Time>, mut q: Query<&mut Terminal>) {
     let mut rng = rand::thread_rng();
     let color_palette = [
         Color::RED,
@@ -107,15 +109,41 @@ fn spam_terminal_b(mut q: Query<&mut Terminal>) {
     draw_helptext(q);
 }
 
-type SpamFunction = fn(Query<&mut Terminal>);
+fn spam_terminal_c(time: Res<Time>, mut q: Query<&mut Terminal>) {
+    let mut rng = rand::thread_rng();
+    const SHIFT_MULT : f32 = 60.0;
+
+    for mut term in q.iter_mut() {
+        for t in term.iter_mut() {
+            let index = rng.gen_range(0..=255) as u8;
+            let glyph = code_page_437::index_to_glyph(index);
+            let elapsed_time = time.elapsed_seconds();
+            let hue = (elapsed_time * SHIFT_MULT) % 360.0;
+            let fg = Color::hsl(hue, 1.0, 0.5);
+            let bg = Color::BLACK;
+
+            *t = Tile {
+                glyph,
+                fg_color: fg,
+                bg_color: bg,
+            }
+        }
+    }
+
+    draw_helptext(q);
+}
+
+
+type SpamFunction = fn(time: Res<Time>, Query<&mut Terminal>);
 
 fn spam_terminal(
     keys: Res<Input<KeyCode>>,
     mut pause: ResMut<Pause>,
-    mut q: Query<&mut Terminal>,
+    q: Query<&mut Terminal>,
     mut spammer: ResMut<CurrentSpamFunction>,
+    time: Res<Time>, // Add this line to include Time resource
 ) {
-    let spam_functions: Vec<SpamFunction> = vec![spam_terminal_a, spam_terminal_b];
+    let spam_functions: Vec<SpamFunction> = vec![spam_terminal_a, spam_terminal_b, spam_terminal_c];
 
     if keys.just_pressed(KeyCode::Space) {
         pause.0 = !pause.0;
@@ -133,5 +161,16 @@ fn spam_terminal(
         spammer.index = (spammer.index + spam_functions.len() - 1) % spam_functions.len();
     }
 
-    spam_functions[spammer.index](q);
+    spam_functions[spammer.index](time, q);
+}
+
+fn quit_on_escape(
+    input: Res<Input<KeyCode>>,
+    mut exit_events: ResMut<Events<AppExit>>,
+) {
+    // Check if the Escape key is pressed
+    if input.just_pressed(KeyCode::Escape) {
+        // Send an exit event to quit the application
+        exit_events.send(AppExit);
+    }
 }
