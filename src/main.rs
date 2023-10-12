@@ -37,6 +37,16 @@ fn setup(mut commands: Commands) {
     ));
 }
 
+fn draw_helptext(mut q: Query<&mut Terminal>) {
+    for mut term in q.iter_mut() {
+		    let top = term.side_index(Side::Top) as i32;
+		    term.clear_box([0, top], [30, 1]);
+		    term.put_string([0, top], "Press space to pause");
+		    term.clear_box([0, top-1], [30, 1]);
+		    term.put_string([0, top-1], "Left / Right to change effect");
+	    }
+}
+
 fn rand_color(rng: &mut ThreadRng) -> Color {
     let r: f32 = rng.gen_range(0.0..=1.0);
     let g: f32 = rng.gen_range(0.0..=1.0);
@@ -59,10 +69,9 @@ fn spam_terminal_a(mut q: Query<&mut Terminal>) {
                 bg_color: bg,
             }
         }
-        let top = term.side_index(Side::Top) as i32;
-        term.clear_box([0, top], [25, 1]);
-        term.put_string([0, top], "Press space to pause");
     }
+
+    draw_helptext(q);
 }
 
 fn spam_terminal_b(mut q: Query<&mut Terminal>) {
@@ -94,10 +103,8 @@ fn spam_terminal_b(mut q: Query<&mut Terminal>) {
             current_color_index = (current_color_index + 1) % color_palette.len();
         }
 
-        let top = term.side_index(Side::Top) as i32;
-        term.clear_box([0, top], [25, 1]);
-        term.put_string([0, top], "Press space to pause");
     }
+    draw_helptext(q);
 }
 
 type SpamFunction = fn(Query<&mut Terminal>);
@@ -126,6 +133,5 @@ fn spam_terminal(
         spammer.index = (spammer.index + spam_functions.len() - 1) % spam_functions.len();
     }
 
-    // Call the selected spam_terminal_X function based on the current_spam_function
     spam_functions[spammer.index](q);
 }
