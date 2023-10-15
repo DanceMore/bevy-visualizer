@@ -1,9 +1,9 @@
+use bevy::app::AppExit;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_ascii_terminal::{code_page_437, prelude::*};
 use rand::prelude::ThreadRng;
 use rand::Rng;
-use bevy::app::AppExit;
 
 use bevy_fundsp::prelude::*;
 
@@ -176,10 +176,7 @@ fn spam_terminal(
     spam_functions[spammer.index](time, q);
 }
 
-fn quit_on_escape(
-    input: Res<Input<KeyCode>>,
-    mut exit_events: ResMut<Events<AppExit>>,
-) {
+fn quit_on_escape(input: Res<Input<KeyCode>>, mut exit_events: ResMut<Events<AppExit>>) {
     // Check if the Escape key is pressed
     if input.just_pressed(KeyCode::Escape) {
         // Send an exit event to quit the application
