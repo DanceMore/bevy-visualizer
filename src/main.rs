@@ -5,6 +5,8 @@ use bevy_ascii_terminal::{code_page_437, prelude::*};
 //use rand::prelude::ThreadRng;
 //use rand::Rng;
 
+use bevy_embedded_assets::EmbeddedAssetPlugin;
+
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bevy_fundsp::prelude::*;
 
@@ -21,7 +23,9 @@ fn main() {
 	//	b: 0.0,
 	//})
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins
+	    .build()
+            .add_before::<bevy::asset::AssetPlugin, _>(EmbeddedAssetPlugin),
             TerminalPlugin,
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin::default(),
