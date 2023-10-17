@@ -413,3 +413,53 @@ fn play_piano(
         ..default()
     });
 }
+
+
+
+
+
+
+use bevy::render::render_asset::RenderAssets;
+use std::ops::DerefMut;
+
+fn prepare_my_material(
+	mut material_assets: ResMut<Assets<CustomMaterial>>,
+	mut shader_data: ResMut<ShaderData>,
+	dsp_manager: Res<DspManager>,
+	) {
+
+	let dsp_id = Uuid::from_u128(0xa1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d8u128);
+	let dsp = dsp_manager.get_graph_by_id(&dsp_id);
+	//println!("{:?}", dsp);
+
+	// Ensure the DSP exists
+	if let Some(dsp) = dsp {
+		println!("DSP found: {:?}", dsp_id);
+
+		// Get a single element (sample)
+		if let Some(sample) = dsp.into_iter().take(1).next() {
+			// Do something with the sample
+			println!("Sample: {:?}", sample);
+
+			for (handle, mut material) in material_assets.iter_mut() {
+				let material = material.deref_mut(); // Dereference the mutable reference
+				material.uniforms.r = sample[0];
+			}
+		} else {
+			println!("DSP is empty.");
+		}
+	}
+
+	//for (handle, mut material) in material_assets.iter_mut() {
+	//	let material = material.deref_mut(); // Dereference the mutable reference
+
+	//	material.uniforms.r = dsp[0];
+	//	//material.uniforms.r = shader_data.r;
+	//	//material.uniforms.g = shader_data.g;
+	//	//material.uniforms.b = shader_data.b;
+	//}
+
+
+}
+
+
