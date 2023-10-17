@@ -1055,6 +1055,7 @@ dependencies = [
  "bevy_egui",
  "bevy_embedded_assets",
  "bevy_fundsp",
+ "fundsp",
  "rand",
  "uuid",
 ]

@@ -42,16 +42,16 @@ fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
     let distance_to_center = distance(in.uv, vec2<f32>(0.5)) * 1.4;
 
     // blending is done in a perceptual color space: https://bottosson.github.io/posts/oklab/
-    //let red = vec3<f32>(0.627955, 0.224863, 0.125846);
-    //let green = vec3<f32>(0.86644, -0.233887, 0.179498);
-    //let blue = vec3<f32>(0.701674, 0.274566, -0.169156);
+    let red = vec3<f32>(0.627955, 0.224863, 0.125846);
+    let green = vec3<f32>(0.86644, -0.233887, 0.179498);
+    let blue = vec3<f32>(0.701674, 0.274566, -0.169156);
 
-    let red =   vec3<f32>(shader_data.r, 0.0, 0.0);
-    let green = vec3<f32>(0.0, shader_data.g, 0.0);
-    let blue =  vec3<f32>(0.0, 0.0, shader_data.b);
+    //let red =   vec3<f32>(shader_data.r, 0.0, 0.0);
+    //let green = vec3<f32>(0.0, shader_data.g, 0.0);
+    //let blue =  vec3<f32>(0.0, 0.0, shader_data.b);
     let white = vec3<f32>(1.0, 0.0, 0.0);
-    //let mixed = mix(mix(red, blue, t_1), mix(green, white, t_2), distance_to_center);
-    let mixed = mix(mix(red, blue, shader_data.r), mix(green, white, shader_data.r), distance_to_center);
+    let mixed = mix(mix(red, blue, t_1), mix(green, white, t_2), distance_to_center);
+    //let mixed = mix(mix(red, blue, shader_data.r), mix(green, white, shader_data.r), distance_to_center);
 
     return vec4<f32>(oklab_to_linear_srgb(mixed), 0.0);
     //return vec4<f32>(shader_data.r, shader_data.g, shader_data.b, 0.0);

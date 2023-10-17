@@ -17,11 +17,11 @@ fn main() {
         //.init_resource::<DspData>()
         .insert_resource(DspManager::default())
         .insert_resource(CurrentSpamFunction { index: 0 }) // Initialize with your default function
-	//.insert_resource(MyShaderData {
-	//	r: 0.0,
-	//	g: 0.0,
-	//	b: 0.0,
-	//})
+	.insert_resource(ShaderData {
+		r: 0.0,
+		g: 0.0,
+		b: 0.0,
+	})
         .add_plugins((
             DefaultPlugins
 	    .build()
@@ -31,6 +31,7 @@ fn main() {
             FrameTimeDiagnosticsPlugin::default(),
         ))
         .add_plugins(MaterialPlugin::<CustomMaterial>::default())
+	//.add_plugins(MaterialPlugin::<UShaderData>::default())
         .add_plugins(DspPlugin::default())
         .add_plugins(EguiPlugin)
         .add_plugins(PianoPlugin)
@@ -41,19 +42,21 @@ fn main() {
         .add_systems(Update, quit_on_escape)
         .add_systems(Update, ui_example_system)
         //.add_systems(Update, sync_data)
+        .add_systems(Update, prepare_my_material)
+        //.add_systems(Update, play_wav_via_dsp)
         //.add_systems(Update, update_dsp_data)
         .run();
 }
 
-//fn sync_data(ui_state: ResMut<UiState>,
-//             mut shader_data: ResMut<MyShaderData>,
-//) {
-//	shader_data.r = ui_state.r.clone() as f32;
-//	shader_data.g = ui_state.g.clone() as f32;
-//	shader_data.b = ui_state.b.clone() as f32;
-//
-//	//println!("[-] {:?}", shader_data);
-//}
+fn sync_data(ui_state: ResMut<UiState>,
+             mut shader_data: ResMut<ShaderData>,
+) {
+	//shader_data.r = ui_state.r.clone() as f32;
+	//shader_data.g = ui_state.g.clone() as f32;
+	//shader_data.b = ui_state.b.clone() as f32;
+
+	println!("[-] {:?}", shader_data);
+}
 
 use bevy::{
     pbr::{MaterialPipeline, MaterialPipelineKey},
@@ -69,9 +72,16 @@ use bevy::{
 
 use bevy::asset::LoadState;
 
-#[derive(Reflect, TypeUuid, AsBindGroup, Debug, Clone)]
+use std::borrow::Cow;
+
+
+//#[derive(Reflect, TypeUuid, AsBindGroup, Debug, Clone)]
+#[derive(AsBindGroup, TypeUuid, TypePath, Debug, Clone)]
 #[uuid = "b8e1724f-3311-4d4f-a5ad-e167b78436e0"]
-struct CustomMaterial {}
+struct CustomMaterial {
+    #[uniform(0)]
+    uniforms: ShaderData,
+}
 
 impl Material for CustomMaterial {
     fn fragment_shader() -> ShaderRef {
@@ -103,28 +113,56 @@ impl Material for CustomMaterial {
     //}
 }
 
-// This is the struct that will be passed to your shader
-#[repr(C)]
-#[derive(AsBindGroup,Component)]
-struct MyShaderData {
-  #[uniform(0)]
+use bevy::render::render_resource::ShaderType;
+
+#[derive(Clone, Debug, TypeUuid, TypePath, ShaderType, Component, Resource)]
+#[uuid = "ed5396f9-26cc-4f40-9123-2b302d729ecf"]
+struct ShaderData {
   r: f32,
   g: f32,
   b: f32,
-  _pad: f32,
 }
 
-impl Default for MyShaderData {
+impl Default for ShaderData {
     fn default() -> Self {
-        MyShaderData {
+        ShaderData {
             r: 0.1,
 	    g: 0.0,
 	    b: 0.0,
-	    _pad: 0.0,
-
         }
     }
 }
+
+//#[derive(AsBindGroup, TypeUuid, TypePath, Debug, Clone, Default)]
+//#[uuid = "c74e039a-3df7-4f71-bd1d-7fe4b25a2230"]
+//struct UShaderData{
+//    #[uniform(0)]
+//    uniforms: ShaderData,
+//}
+
+//// WORKS
+//// This is the struct that will be passed to your shader
+//#[repr(C)]
+//#[derive(AsBindGroup,Component)]
+//struct MyShaderData {
+//  #[uniform(0)]
+//  r: f32,
+//  g: f32,
+//  b: f32,
+//  _pad: f32,
+//}
+//
+//impl Default for MyShaderData {
+//    fn default() -> Self {
+//        MyShaderData {
+//            r: 0.1,
+//	    g: 0.0,
+//	    b: 0.0,
+//	    _pad: 0.0,
+//
+//        }
+//    }
+//}
 
 //#[derive(Resource, Default)]
 //struct MyShaderData {
@@ -139,6 +177,7 @@ fn setup(
 	//mut materials: ResMut<Assets<CustomMaterial>>,
 	mut s_materials: ResMut<Assets<StandardMaterial>>,
 	mut c_materials: ResMut<Assets<CustomMaterial>>,
+		     mut shader_data: ResMut<ShaderData>,
 	    asset_server: Res<AssetServer>,
 	) {
 
@@ -162,7 +201,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(bevy::prelude::shape::Cube { size: 1.0 })),
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
 	//material: s_materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        material: c_materials.add(CustomMaterial {} ),
+        material: c_materials.add(CustomMaterial { uniforms: ShaderData{r: 1.0, g: 0.0, b: 0.0} } ),
         ..default()
     });
 
@@ -178,7 +217,7 @@ fn setup(
 
 fn ui_example_system(time: Res<Time>, mut contexts: EguiContexts,     mut ui_state: ResMut<UiState>,
 		     dsp_manager: Res<DspManager>,
-		     //mut shader_data: ResMut<MyShaderData>,
+		     mut shader_data: ResMut<ShaderData>,
 		     ) {
 
     egui::SidePanel::left("side_panel")
@@ -191,9 +230,9 @@ fn ui_example_system(time: Res<Time>, mut contexts: EguiContexts,     mut ui_sta
                 ui_state.value += 1.0;
             }
 
-            ui.add(egui::Slider::new(&mut ui_state.shader_data.r, 0.0..=100000.0).text("value"));
-            ui.add(egui::Slider::new(&mut ui_state.shader_data.g, 0.0..=1.0).text("value"));
-            ui.add(egui::Slider::new(&mut ui_state.shader_data.b, 0.0..=1.0).text("value"));
+            ui.add(egui::Slider::new(&mut shader_data.r, 0.0..=1.0).text("value"));
+            ui.add(egui::Slider::new(&mut shader_data.g, 0.0..=1.0).text("value"));
+            ui.add(egui::Slider::new(&mut shader_data.b, 0.0..=1.0).text("value"));
 
 	    //example_plot(ui, &time, &[1.0,2.0,3.0]);
 	    //example_plot(ui, &time);
@@ -210,7 +249,7 @@ fn ui_example_system(time: Res<Time>, mut contexts: EguiContexts,     mut ui_sta
 struct UiState {
     label: String,
     value: f32,
-    shader_data: MyShaderData,
+    loaded_wav: bool,
 }
 
 #[derive(Resource, Default)]
