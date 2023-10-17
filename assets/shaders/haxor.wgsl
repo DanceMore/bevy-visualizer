@@ -6,6 +6,7 @@ struct UShaderData {
     r: f32,
     g: f32,
     b: f32,
+    _pad: f32,
 };
 
 @group(1) @binding(0) var<uniform> shader_data: UShaderData;
