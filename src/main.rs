@@ -21,6 +21,7 @@ fn main() {
 		r: 0.0,
 		g: 0.0,
 		b: 0.0,
+	        _pad: 0.0,
 	})
         .add_plugins((
             DefaultPlugins
@@ -121,6 +122,7 @@ struct ShaderData {
   r: f32,
   g: f32,
   b: f32,
+  _pad: f32,
 }
 
 impl Default for ShaderData {
@@ -129,6 +131,7 @@ impl Default for ShaderData {
             r: 0.1,
 	    g: 0.0,
 	    b: 0.0,
+	    _pad: 0.0,
         }
     }
 }
@@ -201,7 +204,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(bevy::prelude::shape::Cube { size: 1.0 })),
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
 	//material: s_materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        material: c_materials.add(CustomMaterial { uniforms: ShaderData{r: 1.0, g: 0.0, b: 0.0} } ),
+        material: c_materials.add(CustomMaterial { uniforms: ShaderData{r: 1.0, g: 0.0, b: 0.0, _pad: 0.0} } ),
         ..default()
     });
 
