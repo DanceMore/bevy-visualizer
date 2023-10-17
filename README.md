@@ -13,6 +13,10 @@ https://github.com/bevyengine/bevy/blob/main/docs/linux_dependencies.md
 ## webasm build
 
 ```
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli
+
+```
 cargo build --release --target wasm32-unknown-unknown
 wasm-bindgen target/wasm32-unknown-unknown/release/bevy_visualizer.wasm --out-dir ./docs/ --target web
 ```
