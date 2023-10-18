@@ -1032,7 +1032,9 @@ dependencies = [
  "bevy_embedded_assets",
  "bevy_fundsp",
  "fundsp",
+ "num-complex",
  "rand",
+ "rustfft",
  "uuid",
 ]
 

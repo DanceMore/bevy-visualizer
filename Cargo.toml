@@ -14,7 +14,9 @@ bevy_egui = "0.22.0"
 bevy_embedded_assets = "0.8.0"
 bevy_fundsp = "0.4.0"
 fundsp = "0.15.0"
+num-complex = "0.4.4"
 rand = "0.8.5"
+rustfft = "6.1.0"
 uuid = "1.4.1"
 
 # from https://bevy-cheatbook.github.io/pitfalls/performance.html

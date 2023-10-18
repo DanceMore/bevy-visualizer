@@ -23,6 +23,9 @@ use fundsp::hacker32::*; // Import the appropriate Backend32
 use std::ops::DerefMut;
 use uuid::Uuid;
 
+use rustfft::{FftPlanner, num_complex::Complex};
+
+
 // I'm coming back to put more state here
 #[allow(dead_code)]
 #[derive(Resource, Default)]
@@ -61,16 +64,18 @@ fn main() {
         .add_asset::<CustomMaterial>()
         .add_systems(Startup, setup_scene)
         // examples of other stages I can use
-        //.add_systems(Startup, init_assets)
+        .add_systems(Startup, init_assets)
         //.add_systems(PostStartup, play_sine)
         .add_systems(Update, quit_on_escape)
         .add_systems(Update, ui_example_system)
         .add_systems(Update, prepare_my_material)
+        .add_systems(Update, write_to_fft_buffer)
         .run();
 }
 
 // does nothing but I probably need it soon
 fn init_assets(mut commands: Commands) {
+    commands.insert_resource(SampleBuffer::default());
     //commands.insert_resource(AudioPlugin::default());
     //let handle = assets.add(Sine);
     //commands.insert_resource(SineHandle(handle));
@@ -197,12 +202,85 @@ fn prepare_my_material(
     mut material_assets: ResMut<Assets<CustomMaterial>>,
     mut shader_data: ResMut<ShaderData>,
     mut audio_network: ResMut<AudioNetwork>,
+mut sample_buffer: ResMut<SampleBuffer>,
 ) {
     for (handle, mut material) in material_assets.iter_mut() {
         let material = material.deref_mut(); // Dereference the mutable reference
         let sample = audio_network.backend.get_mono();
-        //println!("[+] writing material value: {:?}", sample);
-        material.uniforms.r = sample;
+        //println!("[+] raw sample: {:?}", sample);
+	let complex_sample = Complex::new(sample, 0.0);
+
+	let mut planner = FftPlanner::new();
+	let fft = planner.plan_fft_forward(16);
+
+	// Convert the buffer to Complex numbers (if needed) and process with FFT.
+	let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+	fft.process(&mut complex_buffer);
+
+	if !complex_buffer.is_empty() && complex_buffer.len() >= 3 {
+		// Extract the first 3 results from complex_buffer
+		let magnitude_0 = complex_buffer[0].norm();
+		let magnitude_1 = complex_buffer[1].norm();
+		let magnitude_2 = complex_buffer[2].norm();
+
+		// Set the values in material.uniforms
+		material.uniforms.r = magnitude_0 as f32;
+		material.uniforms.g = magnitude_1 as f32;
+		material.uniforms.b = magnitude_2 as f32;
+	}
+
+	const LOWER_FREQ_HZ: f32 = 0.0;   // Replace with your lower bound
+	const UPPER_FREQ_HZ: f32 = 24000.0; // Replace with your upper bound
+
+	const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
+	const BASS_MAX_FREQ: f32 = 250.0;
+	const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
+	const MIDRANGE_MAX_FREQ: f32 = 4000.0;
+	const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
+	const TREBLE_MAX_FREQ: f32 = 20000.0;
+
+
+	const MAX_LINES_TO_PRINT: usize = 15; // Change this to your desired limit
+	let mut lines_printed = 0; // Initialize a counter
+
+	let mut bass_sum = 0.0;
+	let mut midrange_sum = 0.0;
+	let mut treble_sum = 0.0;
+
+	for (i, &result) in complex_buffer.iter().enumerate() {
+		// Calculate frequency in Hz
+		let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
+		let magnitude = result.norm(); // Magnitude
+		let phase = result.arg();     // Phase (in radians)
+
+		if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
+			bass_sum += magnitude;
+		} else if frequency_in_hz >= MIDRANGE_MIN_FREQ && frequency_in_hz <= MIDRANGE_MAX_FREQ {
+			midrange_sum += magnitude;
+		} else if frequency_in_hz >= TREBLE_MIN_FREQ && frequency_in_hz <= TREBLE_MAX_FREQ {
+			treble_sum += magnitude;
+		}
+
+
+		// Check if the frequency is within the specified range
+		//if frequency_in_hz >= LOWER_FREQ_HZ && frequency_in_hz <= UPPER_FREQ_HZ {
+		//	lines_printed += 1; // Increment the counter
+		//	println!("Frequency bin {}: Frequency: {:.2} Hz, Magnitude: {:.2}, Phase: {:.2} radians", i, frequency_in_hz, magnitude, phase);
+		//}
+
+		//if lines_printed >= MAX_LINES_TO_PRINT {
+		//	break; // Exit the loop
+		//}
+	}
+
+	println!("[-] {} {} {}", bass_sum, midrange_sum, treble_sum);
+
+	material.uniforms.r = bass_sum as f32;
+	material.uniforms.g = midrange_sum as f32;
+	material.uniforms.b = treble_sum as f32;
+
+
+        //material.uniforms.r = sample;
 
         //material.uniforms.r = shader_data.r;
         //material.uniforms.g = shader_data.g;
@@ -308,3 +386,40 @@ impl AudioNetwork {
         self.frontend.commit();
     }
 }
+
+
+
+
+
+
+const BUFFER_SIZE: usize = 256;
+
+#[derive(Resource)]
+pub struct SampleBuffer {
+    buffer: Vec<f32>,
+}
+
+impl Default for SampleBuffer {
+    fn default() -> Self {
+        Self {
+            buffer: vec![0.0; BUFFER_SIZE],
+        }
+    }
+}
+
+fn write_to_fft_buffer(mut sample_buffer: ResMut<SampleBuffer>,
+mut audio_network: ResMut<AudioNetwork>
+) {
+    let sample = audio_network.backend.get_mono();
+
+    sample_buffer.buffer.push(sample);
+
+    if sample_buffer.buffer.len() > BUFFER_SIZE {
+        sample_buffer.buffer.remove(0);
+    }
+}
+
+
+
+const SAMPLE_RATE: f32 = 44100.0; // Replace with your sample rate
+

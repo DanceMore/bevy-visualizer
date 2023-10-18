@@ -78,15 +78,30 @@ fn oklab_to_linear_srgb(c: vec3<f32>) -> vec3<f32> {
 //    return vec4<f32>(red, green, blue, 1.0);
 //}
 
+//@fragment
+//fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
+//    let audioValue = shader_data.r; // Sample audio data
+//
+//    let scaled_value = audioValue * 1000.0;
+//
+//    let red = f32(sin(scaled_value));
+//    let green = 0.0;
+//    let blue = 0.2;
+//
+//    return vec4<f32>(red, green, blue, 1.0);
+//}
+
 @fragment
 fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
+    let scaling_factor = 1000.0;
+
     let audioValue = shader_data.r; // Sample audio data
 
     let scaled_value = audioValue * 1000.0;
 
-    let red = f32(sin(scaled_value));
-    let green = 0.0;
-    let blue = 0.2;
+    let red   = f32(sin(shader_data.r * scaling_factor));
+    let green = f32(sin(shader_data.g * scaling_factor));
+    let blue  = f32(sin(shader_data.b * scaling_factor));
 
     return vec4<f32>(red, green, blue, 1.0);
 }
