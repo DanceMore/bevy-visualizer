@@ -82,9 +82,9 @@ fn oklab_to_linear_srgb(c: vec3<f32>) -> vec3<f32> {
 fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
     let audioValue = shader_data.r; // Sample audio data
 
-    let scaled_value = audioValue * 10000.0;
+    let scaled_value = audioValue * 1000.0;
 
-    let red = scaled_value;
+    let red = f32(sin(scaled_value));
     let green = 0.0;
     let blue = 0.2;
 
