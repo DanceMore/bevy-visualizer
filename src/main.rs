@@ -1,5 +1,5 @@
 use bevy::app::AppExit;
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+//use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 
 use bevy_embedded_assets::EmbeddedAssetPlugin;
@@ -51,8 +51,8 @@ fn main() {
             DefaultPlugins
                 .build()
                 .add_before::<bevy::asset::AssetPlugin, _>(EmbeddedAssetPlugin),
-            LogDiagnosticsPlugin::default(),
-            FrameTimeDiagnosticsPlugin::default(),
+ //           LogDiagnosticsPlugin::default(),
+ //           FrameTimeDiagnosticsPlugin::default(),
         ))
         //.add_plugins(AudioPlugin { global_volume: 0.8 as GlobalVolume})
         .add_plugins(DrawableDspPlugin)
