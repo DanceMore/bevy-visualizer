@@ -61,19 +61,32 @@ fn oklab_to_linear_srgb(c: vec3<f32>) -> vec3<f32> {
 //}
 
 
+//@fragment
+//fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
+//    let audioValue = shader_data.r; // Sample audio data
+//
+//    // Create a dynamic wave pattern based on audio amplitude
+//    let frequency = 2.0 + audioValue * 10.0; // Adjust the frequency of the waves based on audioValue
+//    let time = 10.0 * f32(globals.time);
+//    let wave = 0.5 + 0.5 * f32(sin(frequency * time)); // Dynamic wave pattern
+//
+//    // Use the frequency to set colors
+//    let red = 0.5 + 0.5 * f32(sin(frequency * 2.0));
+//    let green = 0.5 + 0.5 * f32(cos(frequency * 3.0));
+//    let blue = 0.5 + 0.5 * f32(sin(frequency * 1.5));
+//
+//    return vec4<f32>(red, green, blue, 1.0);
+//}
+
 @fragment
 fn fragment(in: MeshVertexOutput) -> @location(0) vec4<f32> {
     let audioValue = shader_data.r; // Sample audio data
 
-    // Create a dynamic wave pattern based on audio amplitude
-    let frequency = 2.0 + audioValue * 10.0; // Adjust the frequency of the waves based on audioValue
-    let time = 10.0 * f32(globals.time);
-    let wave = 0.5 + 0.5 * f32(sin(frequency * time)); // Dynamic wave pattern
+    let scaled_value = audioValue * 10000.0;
 
-    // Use the frequency to set colors
-    let red = 0.5 + 0.5 * f32(sin(frequency * 2.0));
-    let green = 0.5 + 0.5 * f32(cos(frequency * 3.0));
-    let blue = 0.5 + 0.5 * f32(sin(frequency * 1.5));
+    let red = scaled_value;
+    let green = 0.0;
+    let blue = 0.2;
 
     return vec4<f32>(red, green, blue, 1.0);
 }
