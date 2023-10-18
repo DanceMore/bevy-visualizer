@@ -201,7 +201,7 @@ fn prepare_my_material(
     for (handle, mut material) in material_assets.iter_mut() {
         let material = material.deref_mut(); // Dereference the mutable reference
         let sample = audio_network.frontend.get_mono();
-        println!("[+] writing material value: {:?}", sample);
+        //println!("[+] writing material value: {:?}", sample);
         material.uniforms.r = sample;
 
         //material.uniforms.r = shader_data.r;
@@ -236,7 +236,7 @@ impl Plugin for DrawableDspPlugin {
 
         let wavefile = Wave64::load("test.wav").unwrap();
         let cloned_wave3 = Arc::new(wavefile.clone());
-        let piano = bevy_fundsp::prelude::wave64(&cloned_wave3, 0, None);
+        let piano = bevy_fundsp::prelude::wave64(&cloned_wave3, 0, Some(0));
         let piano_clone = piano.clone();
 
         let piano_dsp = DrawableDsp(move || piano.clone());
@@ -254,8 +254,8 @@ impl Plugin for DrawableDspPlugin {
             .add_dsp_source(piano_dsp, SourceType::Dynamic)
             .insert_resource(audio_network)
             .insert_resource(DrawableDspId(piano_id))
-            .add_systems(PostStartup, drawable_dsp_start)
-            .add_systems(Update, drawable_dsp_debugprint);
+            .add_systems(PostStartup, drawable_dsp_start);
+            //.add_systems(Update, drawable_dsp_debugprint);
     }
 }
 
