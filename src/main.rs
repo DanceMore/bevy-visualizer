@@ -200,7 +200,7 @@ fn prepare_my_material(
 ) {
     for (handle, mut material) in material_assets.iter_mut() {
         let material = material.deref_mut(); // Dereference the mutable reference
-        let sample = audio_network.frontend.get_mono();
+        let sample = audio_network.backend.get_mono();
         //println!("[+] writing material value: {:?}", sample);
         material.uniforms.r = sample;
 
@@ -248,7 +248,7 @@ impl Plugin for DrawableDspPlugin {
         // Initialize and store the AudioNetwork as a resource.
         println!("[+] setup AudioNetwork...");
         let mut audio_network = AudioNetwork::new();
-        audio_network.update_frontend(custom_graph);
+        audio_network.connect_graph(custom_graph);
 
         app.add_plugins((DspPlugin::default(),))
             .add_dsp_source(piano_dsp, SourceType::Dynamic)
@@ -303,7 +303,7 @@ impl AudioNetwork {
 
     // TODO: maybe rename this idk
     // basically just chains the DSP Graph into itself for sharing
-    pub fn update_frontend(&mut self, custom_graph: Box<dyn AudioUnit32>) {
+    pub fn connect_graph(&mut self, custom_graph: Box<dyn AudioUnit32>) {
         let _noise_id = self.frontend.chain(custom_graph);
         self.frontend.commit();
     }
