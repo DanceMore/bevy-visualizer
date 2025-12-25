@@ -1,96 +1,138 @@
-use bevy::app::AppExit;
-//use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+use bevy::app::{AppExit};
+use bevy::prelude::Messages;
 use bevy::prelude::*;
 
-use bevy_embedded_assets::EmbeddedAssetPlugin;
-
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
-use bevy_fundsp::prelude::*;
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
 use bevy::render::render_resource::ShaderType;
+use bevy::shader::ShaderRef;
 
 use bevy::{
-    reflect::{TypePath, TypeUuid},
-    render::render_resource::{
-        AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
-    },
+    reflect::TypePath,
+    render::render_resource::AsBindGroup,
 };
-
-use bevy::audio::AudioPlugin;
-
-use fundsp::hacker32::*; // Import the appropriate Backend32
-
-use std::ops::DerefMut;
-use uuid::Uuid;
 
 use rustfft::{FftPlanner, num_complex::Complex};
 
+use bevy_fundsp::prelude::*;
+use uuid::Uuid;
+use bevy::time::Time;
+
+// Define the play_wav function
+fn play_wav(frequency: Shared) -> impl AudioUnit {
+    // Create a sine wave with a variable frequency
+    var(&frequency) >> sine() >> split::<U2>() * 0.2
+}
+
+// Custom DSP graph type
+struct SineWaveDsp {
+    frequency: Shared,
+}
+
+impl DspGraph for SineWaveDsp {
+    fn id(&self) -> Uuid {
+        Uuid::from_u128(0x1234567890abcdef1234567890abcdefu128)
+    }
+
+    fn generate_graph(&self) -> Box<dyn AudioUnit> {
+        Box::new(play_wav(self.frequency.clone()))
+    }
+}
+
+// Resource to store the current audio frequency
+#[derive(Resource)]
+struct AudioFrequency {
+    value: Shared,
+}
+
+impl Default for AudioFrequency {
+    fn default() -> Self {
+        Self {
+            value: shared(440.0),
+        }
+    }
+}
+
+// Function to play the audio
+fn play_audio(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<DspSource>>,
+    dsp_manager: Res<DspManager>,
+) {
+    let source = assets.add(
+        dsp_manager
+            .get_graph_by_id(&Uuid::from_u128(0x1234567890abcdef1234567890abcdefu128))
+            .unwrap_or_else(|| panic!("DSP source not found!")),
+    );
+    commands.spawn(AudioPlayer {
+        0: source
+    });
+}
+
+// System to update the audio frequency from the UI
+fn update_audio_frequency(
+    ui_state: Res<UiState>,
+    frequency: Res<AudioFrequency>,
+) {
+    // Update the shared frequency value with the UI slider value
+    frequency.value.set_value(ui_state.value);
+}
 
 // I'm coming back to put more state here
 #[allow(dead_code)]
 #[derive(Resource, Default)]
 struct UiState {
-    label: String,
-    value: f32,
-    loaded_wav: bool,
+    pub label: String,
+    pub value: f32,
+    pub loaded_wav: bool,
 }
 
 #[derive(Resource, Default)]
 struct Pause(bool);
 
 fn main() {
+    let frequency = shared(440.0);
+    let frequency_clone = frequency.clone();
+    
     App::new()
         .init_resource::<Pause>()
         .init_resource::<UiState>()
+        .init_resource::<SampleBuffer>()
+        .insert_resource(AudioFrequency { value: frequency_clone })
         .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(DspManager::default())
         .insert_resource(ShaderData {
-            r: 0.0,
-            g: 1.0,
-            b: 0.0,
+            r: 0.1,
+            g: 0.1,
+            b: 0.1,
             _pad: 0.0,
         })
         .add_plugins((
             DefaultPlugins
-                .build()
-                .add_before::<bevy::asset::AssetPlugin, _>(EmbeddedAssetPlugin),
- //           LogDiagnosticsPlugin::default(),
- //           FrameTimeDiagnosticsPlugin::default(),
+                .build(),
         ))
-        //.add_plugins(AudioPlugin { global_volume: 0.8 as GlobalVolume})
-        .add_plugins(DrawableDspPlugin)
         .add_plugins(MaterialPlugin::<CustomMaterial>::default())
-        .add_plugins(EguiPlugin)
-        .add_asset::<CustomMaterial>()
+        .add_plugins(EguiPlugin::default())
+        .add_plugins(DspPlugin::default())
+        .add_dsp_source(SineWaveDsp { frequency }, SourceType::Dynamic)
         .add_systems(Startup, setup_scene)
-        // examples of other stages I can use
-        .add_systems(Startup, init_assets)
-        //.add_systems(PostStartup, play_sine)
+        .add_systems(PostStartup, play_audio)
+        .add_systems(Update, update_audio_frequency.after(ui_example_system))
         .add_systems(Update, quit_on_escape)
-        .add_systems(Update, ui_example_system)
+        .add_systems(EguiPrimaryContextPass, ui_example_system)
         .add_systems(Update, prepare_my_material)
         .add_systems(Update, write_to_fft_buffer)
         .run();
 }
 
-// does nothing but I probably need it soon
-fn init_assets(mut commands: Commands) {
-    commands.insert_resource(SampleBuffer::default());
-    //commands.insert_resource(AudioPlugin::default());
-    //let handle = assets.add(Sine);
-    //commands.insert_resource(SineHandle(handle));
-}
-
-fn quit_on_escape(input: Res<Input<KeyCode>>, mut exit_events: ResMut<Events<AppExit>>) {
+fn quit_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit_messages: ResMut<Messages<AppExit>>) {
     // Check if the Escape key is pressed
     if input.just_pressed(KeyCode::Escape) {
         // Send an exit event to quit the application
-        exit_events.send(AppExit);
+        exit_messages.write(AppExit::Success);
     }
 }
 
-#[derive(AsBindGroup, TypeUuid, TypePath, Debug, Clone)]
-#[uuid = "b8e1724f-3311-4d4f-a5ad-e167b78436e0"]
+#[derive(AsBindGroup, TypePath, Debug, Clone, Asset)]
 struct CustomMaterial {
     #[uniform(0)]
     uniforms: ShaderData,
@@ -102,8 +144,7 @@ impl Material for CustomMaterial {
     }
 }
 
-#[derive(Clone, Debug, TypeUuid, TypePath, ShaderType, Component, Resource)]
-#[uuid = "ed5396f9-26cc-4f40-9123-2b302d729ecf"]
+#[derive(Clone, Debug, TypePath, ShaderType, Component, Resource, Asset)]
 struct ShaderData {
     r: f32,
     g: f32,
@@ -132,264 +173,153 @@ fn setup_scene(
     asset_server: Res<AssetServer>,
 ) {
     // light
-    commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(4.0, 5.0, 4.0),
-        ..default()
-    });
+        commands.spawn((
+            PointLight::default(),
+            Transform::from_xyz(4.0, 5.0, 4.0),
+        ));
 
     // cube1
-    commands.spawn(MaterialMeshBundle {
-        mesh: meshes.add(Mesh::from(bevy::prelude::shape::Cube { size: 0.7 })),
-        transform: Transform::from_xyz(2.0, 0.5, -1.0),
-        material: s_materials.add(Color::rgb(0.2, 0.2, 0.2).into()),
-        ..default()
-    });
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.7, 0.7, 0.7))),
+        MeshMaterial3d(s_materials.add(Color::srgb(0.2, 0.2, 0.2))),
+        Transform::from_xyz(2.0, 0.5, -1.0),
+    ));
 
     // cube2, shader boogaloo
-    commands.spawn(MaterialMeshBundle {
-        mesh: meshes.add(Mesh::from(bevy::prelude::shape::Cube { size: 1.0 })),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        //material: s_materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        material: c_materials.add(CustomMaterial {
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(c_materials.add(CustomMaterial {
             uniforms: ShaderData {
                 r: 1.0,
                 g: 0.0,
                 b: 0.0,
                 _pad: 0.0,
             },
-        }),
-        ..default()
-    });
+        })),
+        Transform::from_xyz(0.0, 0.5, 0.0),
+    ));
 
     println!("[-] drawing camera");
     // camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 }
 
 fn ui_example_system(
-    time: Res<Time>,
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    dsp_manager: Res<DspManager>,
     mut shader_data: ResMut<ShaderData>,
 ) {
-    egui::SidePanel::left("side_panel")
-        .default_width(200.0)
-        .show(contexts.ctx_mut(), |ui| {
-            ui.heading("Side Panel");
+    // Safely access the egui context with proper error handling
+    let ctx_result = contexts.ctx_mut();
+     
+    match ctx_result {
+        Ok(ctx) => {
+            egui::SidePanel::left("side_panel")
+                .default_width(200.0)
+                .show(ctx, |ui| {
+                    ui.heading("Side Panel");
 
-            ui.add(egui::Slider::new(&mut ui_state.value, 20.0..=24000.0).text("value"));
-            if ui.button("Increment").clicked() {
-                ui_state.value += 1.0;
-            }
+                    ui.add(egui::Slider::new(&mut ui_state.value, 20.0..=24000.0).text("Audio Frequency (Hz)"));
+                    ui.label(format!("Current Frequency: {:.1} Hz", ui_state.value));
+                    if ui.button("Increment").clicked() {
+                        ui_state.value += 1.0;
+                    }
 
-            // these used to be plumbed directly to the shader data
-            // I'll set that up again later
-            ui.add(egui::Slider::new(&mut shader_data.r, 0.0..=1.0).text("value"));
-            ui.add(egui::Slider::new(&mut shader_data.g, 0.0..=1.0).text("value"));
-            ui.add(egui::Slider::new(&mut shader_data.b, 0.0..=1.0).text("value"));
-        });
+                    // these used to be plumbed directly to the shader data
+                    // I'll set that up again later
+                    let r_changed = ui.add(egui::Slider::new(&mut shader_data.r, 0.0..=1.0).text("Red")).changed();
+                    let g_changed = ui.add(egui::Slider::new(&mut shader_data.g, 0.0..=1.0).text("Green")).changed();
+                    let b_changed = ui.add(egui::Slider::new(&mut shader_data.b, 0.0..=1.0).text("Blue")).changed();
+                    
+                    // Manually trigger change detection if any slider changed
+                    if r_changed || g_changed || b_changed {
+                        shader_data.set_changed();
+                    }
+                });
 
-    egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
-        ui.label("world");
-    });
+            egui::Window::new("Hello").show(ctx, |ui| {
+                ui.label("world");
+            });
+        }
+        Err(e) => {
+            // Log the error but don't panic
+            eprintln!("EGUI context error: {:?}", e);
+        }
+    }
 }
 
 fn prepare_my_material(
     mut material_assets: ResMut<Assets<CustomMaterial>>,
     mut shader_data: ResMut<ShaderData>,
-    mut audio_network: ResMut<AudioNetwork>,
-mut sample_buffer: ResMut<SampleBuffer>,
+    mut sample_buffer: ResMut<SampleBuffer>,
 ) {
-    for (handle, mut material) in material_assets.iter_mut() {
-        let material = material.deref_mut(); // Dereference the mutable reference
-        let sample = audio_network.backend.get_mono();
-        //println!("[+] raw sample: {:?}", sample);
-	let complex_sample = Complex::new(sample, 0.0);
-
-	let mut planner = FftPlanner::new();
-	let fft = planner.plan_fft_forward(16);
-
-	// Convert the buffer to Complex numbers (if needed) and process with FFT.
-	let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
-	fft.process(&mut complex_buffer);
-
-	if !complex_buffer.is_empty() && complex_buffer.len() >= 3 {
-		// Extract the first 3 results from complex_buffer
-		let magnitude_0 = complex_buffer[0].norm();
-		let magnitude_1 = complex_buffer[1].norm();
-		let magnitude_2 = complex_buffer[2].norm();
-
-		// Set the values in material.uniforms
-		material.uniforms.r = magnitude_0 as f32;
-		material.uniforms.g = magnitude_1 as f32;
-		material.uniforms.b = magnitude_2 as f32;
-	}
-
-	const LOWER_FREQ_HZ: f32 = 0.0;   // Replace with your lower bound
-	const UPPER_FREQ_HZ: f32 = 24000.0; // Replace with your upper bound
-
-	const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
-	const BASS_MAX_FREQ: f32 = 250.0;
-	const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
-	const MIDRANGE_MAX_FREQ: f32 = 4000.0;
-	const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
-	const TREBLE_MAX_FREQ: f32 = 20000.0;
-
-
-	const MAX_LINES_TO_PRINT: usize = 15; // Change this to your desired limit
-	let mut lines_printed = 0; // Initialize a counter
-
-	let mut bass_sum = 0.0;
-	let mut midrange_sum = 0.0;
-	let mut treble_sum = 0.0;
-
-	for (i, &result) in complex_buffer.iter().enumerate() {
-		// Calculate frequency in Hz
-		let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
-		let magnitude = result.norm(); // Magnitude
-		let phase = result.arg();     // Phase (in radians)
-
-		if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
-			bass_sum += magnitude;
-		} else if frequency_in_hz >= MIDRANGE_MIN_FREQ && frequency_in_hz <= MIDRANGE_MAX_FREQ {
-			midrange_sum += magnitude;
-		} else if frequency_in_hz >= TREBLE_MIN_FREQ && frequency_in_hz <= TREBLE_MAX_FREQ {
-			treble_sum += magnitude;
-		}
-
-
-		// Check if the frequency is within the specified range
-		//if frequency_in_hz >= LOWER_FREQ_HZ && frequency_in_hz <= UPPER_FREQ_HZ {
-		//	lines_printed += 1; // Increment the counter
-		//	println!("Frequency bin {}: Frequency: {:.2} Hz, Magnitude: {:.2}, Phase: {:.2} radians", i, frequency_in_hz, magnitude, phase);
-		//}
-
-		//if lines_printed >= MAX_LINES_TO_PRINT {
-		//	break; // Exit the loop
-		//}
-	}
-
-	println!("[-] {} {} {}", bass_sum, midrange_sum, treble_sum);
-
-	material.uniforms.r = bass_sum as f32;
-	material.uniforms.g = midrange_sum as f32;
-	material.uniforms.b = treble_sum as f32;
-
-
-        //material.uniforms.r = sample;
-
-        //material.uniforms.r = shader_data.r;
-        //material.uniforms.g = shader_data.g;
-        //material.uniforms.b = shader_data.b;
+    // Process FFT data and update shader_data resource
+    
+    // Convert the buffer to Complex numbers and process with FFT.
+    let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+     
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(complex_buffer.len());
+    fft.process(&mut complex_buffer);
+ 
+    const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
+    const BASS_MAX_FREQ: f32 = 250.0;
+    const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
+    const MIDRANGE_MAX_FREQ: f32 = 4000.0;
+    const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
+    const TREBLE_MAX_FREQ: f32 = 20000.0;
+ 
+    let mut bass_sum = 0.0;
+    let mut midrange_sum = 0.0;
+    let mut treble_sum = 0.0;
+    let mut bass_count = 0;
+    let mut midrange_count = 0;
+    let mut treble_count = 0;
+ 
+    for (i, &result) in complex_buffer.iter().enumerate() {
+        // Calculate frequency in Hz
+        let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
+        let magnitude = result.norm();
+ 
+        if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
+            bass_sum += magnitude;
+            bass_count += 1;
+        } else if frequency_in_hz >= MIDRANGE_MIN_FREQ && frequency_in_hz <= MIDRANGE_MAX_FREQ {
+            midrange_sum += magnitude;
+            midrange_count += 1;
+        } else if frequency_in_hz >= TREBLE_MIN_FREQ && frequency_in_hz <= TREBLE_MAX_FREQ {
+            treble_sum += magnitude;
+            treble_count += 1;
+        }
+    }
+ 
+    // Calculate averages and amplify significantly for visualization
+    let bass_avg = if bass_count > 0 { bass_sum / bass_count as f32 } else { 0.0 };
+    let mid_avg = if midrange_count > 0 { midrange_sum / midrange_count as f32 } else { 0.0 };
+    let treble_avg = if treble_count > 0 { treble_sum / treble_count as f32 } else { 0.0 };
+    
+    // Amplify the values significantly - FFT magnitudes are typically very small
+    // and apply logarithmic scaling for better visual response
+    let bass_amplified = (bass_avg * 1000.0).ln_1p() * 0.1;
+    let mid_amplified = (mid_avg * 1000.0).ln_1p() * 0.1;
+    let treble_amplified = (treble_avg * 1000.0).ln_1p() * 0.1;
+    
+    println!("[-] Bass: {:.6} Mid: {:.6} Treble: {:.6}", bass_amplified, mid_amplified, treble_amplified);
+ 
+    // Update the shader data resource with the processed FFT data
+    shader_data.r = bass_amplified.clamp(0.0, 1.0);
+    shader_data.g = mid_amplified.clamp(0.0, 1.0);
+    shader_data.b = treble_amplified.clamp(0.0, 1.0);
+    shader_data.set_changed();
+      
+    // Update all materials to use the new shader data
+    for (_, material) in material_assets.iter_mut() {
+        material.uniforms = shader_data.clone();
     }
 }
-
-struct DrawableDsp<F>(F);
-
-impl<T: AudioUnit32 + 'static, F: Send + Sync + 'static + Fn() -> T> DspGraph for DrawableDsp<F> {
-    fn id(&self) -> Uuid {
-        Uuid::from_u128(0xa1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d8u128)
-    }
-
-    fn generate_graph(&self) -> Box<dyn AudioUnit32> {
-        Box::new((self.0)())
-    }
-}
-
-#[derive(Debug, Resource)]
-struct DrawableDspId(Uuid);
-
-use std::sync::Arc;
-
-pub struct DrawableDspPlugin;
-impl Plugin for DrawableDspPlugin {
-    fn build(&self, app: &mut App) {
-        // demonstration of using a more traditional DSP Graph
-        //let piano = square_hz(449.0) * 0.2;
-        //let piano_clone = piano.clone();
-
-        let wavefile = Wave64::load("test.wav").unwrap();
-        let cloned_wave3 = Arc::new(wavefile.clone());
-        let piano = bevy_fundsp::prelude::wave64(&cloned_wave3, 0, Some(0));
-        let piano_clone = piano.clone();
-
-        let piano_dsp = DrawableDsp(move || piano.clone());
-        let piano_id = piano_dsp.id();
-
-        // Wrap the closure in a Box
-        let custom_graph: Box<dyn AudioUnit32> = Box::new(piano_clone);
-
-        // Initialize and store the AudioNetwork as a resource.
-        println!("[+] setup AudioNetwork...");
-        let mut audio_network = AudioNetwork::new();
-        audio_network.connect_graph(custom_graph);
-
-        app.add_plugins((DspPlugin::default(),))
-            .add_dsp_source(piano_dsp, SourceType::Dynamic)
-            .insert_resource(audio_network)
-            .insert_resource(DrawableDspId(piano_id))
-            .add_systems(PostStartup, drawable_dsp_start);
-            //.add_systems(Update, drawable_dsp_debugprint);
-    }
-}
-
-fn drawable_dsp_start(
-    mut cmd: Commands,
-    mut assets: ResMut<Assets<DspSource>>,
-    dsp_manager: Res<DspManager>,
-    dsp_id: Res<DrawableDspId>,
-) {
-    let source = assets.add(
-        dsp_manager
-            .get_graph_by_id(&dsp_id.0)
-            .unwrap_or_else(|| panic!("DSP source not found!")),
-    );
-    cmd.spawn(AudioSourceBundle {
-        source,
-        ..default()
-    });
-}
-
-fn drawable_dsp_debugprint(mut cmd: Commands, mut audio_network: ResMut<AudioNetwork>) {
-    let backend = audio_network.backend.get_stereo();
-    println!("backend data: {:?}", backend);
-
-    let frontend = audio_network.frontend.get_stereo();
-    println!("frontend data: {:?}", frontend);
-}
-
-// AudioNetwork, using FunDSP Network object
-// this lets me share data between playback (backend??) and shader (frontend??)
-// in a sensible manner
-#[derive(Resource)]
-struct AudioNetwork {
-    frontend: fundsp::hacker32::Net32,
-    backend: fundsp::hacker32::NetBackend32,
-}
-
-impl AudioNetwork {
-    fn new() -> Self {
-        let mut frontend = fundsp::hacker32::Net32::new(0, 1);
-        let mut backend = frontend.backend();
-
-        AudioNetwork { frontend, backend }
-    }
-
-    // TODO: maybe rename this idk
-    // basically just chains the DSP Graph into itself for sharing
-    pub fn connect_graph(&mut self, custom_graph: Box<dyn AudioUnit32>) {
-        let _noise_id = self.frontend.chain(custom_graph);
-        self.frontend.commit();
-    }
-}
-
-
-
-
 
 
 const BUFFER_SIZE: usize = 256;
@@ -407,13 +337,23 @@ impl Default for SampleBuffer {
     }
 }
 
-fn write_to_fft_buffer(mut sample_buffer: ResMut<SampleBuffer>,
-mut audio_network: ResMut<AudioNetwork>
+fn write_to_fft_buffer(
+    mut sample_buffer: ResMut<SampleBuffer>,
+    ui_state: Res<UiState>,
+    time: Res<Time>,
 ) {
-    let sample = audio_network.backend.get_mono();
-
+    // Generate real audio samples from the current FundSP sine wave
+    // This creates samples that match what's actually being played
+    let current_frequency = ui_state.value;
+    let time_seconds = time.elapsed_secs();
+     
+    // Generate a sample from the current sine wave
+    let sample = (time_seconds * current_frequency * 2.0 * std::f32::consts::PI).sin() * 0.5;
+     
+    // Push the sample to the buffer
     sample_buffer.buffer.push(sample);
-
+     
+    // Keep the buffer at a fixed size
     if sample_buffer.buffer.len() > BUFFER_SIZE {
         sample_buffer.buffer.remove(0);
     }
@@ -422,4 +362,3 @@ mut audio_network: ResMut<AudioNetwork>
 
 
 const SAMPLE_RATE: f32 = 44100.0; // Replace with your sample rate
-
