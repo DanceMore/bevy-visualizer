@@ -1,0 +1,57 @@
+name: Build and Deploy WASM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Install WASM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binaryen
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli
+
+      - name: Build WASM
+        run: |
+          cargo build --target wasm32-unknown-unknown --release
+          wasm-bindgen --out-dir ./docs --target web --no-typescript target/wasm32-unknown-unknown/release/bevy_visualizer.wasm
+
+      - name: Copy WASM files to docs
+        run: |
+          cp target/wasm32-unknown-unknown/release/bevy_visualizer.wasm ./docs/
+          cp target/wasm32-unknown-unknown/release/bevy_visualizer_bg.wasm ./docs/
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add docs/
+          git commit -m "Auto-update WASM files"
+          git push
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Auto-update WASM files"
+          title: "Auto-update WASM files"
+          body: "This PR automatically updates the WASM files in the docs/ directory."
+          branch: "auto-update-wasm"
+          base: "main"
