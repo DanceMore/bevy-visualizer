@@ -271,12 +271,12 @@ fn main() {
         .run();
 }
 
-fn load_wave_file(path: &str) -> Wave {
+fn load_wave_file(_path: &str) -> Wave {
     // For WASM, we need to use the embedded asset system
     #[cfg(target_arch = "wasm32")]
     {
-        // Load the embedded asset as bytes
-        let asset_bytes = include_bytes!(path);
+        // Load the embedded asset as bytes using include_bytes! with a literal path
+        let asset_bytes = include_bytes!("../assets/test.wav");
         
         // Parse the WAV data from bytes
         let cursor = std::io::Cursor::new(asset_bytes);
