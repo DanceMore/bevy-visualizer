@@ -4,6 +4,8 @@ use bevy::prelude::*;
 
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
+use bevy::log::{debug, trace};
+
 use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 
@@ -181,12 +183,25 @@ fn update_audio_source(
 
 // I'm coming back to put more state here
 #[allow(dead_code)]
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct UiState {
     pub label: String,
     pub value: f32,
     pub loaded_wav: bool,
     pub use_wave_file: bool,
+    pub use_raw_audio: bool, // New option to use raw audio data instead of FFT
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            label: String::from("Hello World!"),
+            value: 440.0,
+            loaded_wav: false,
+            use_wave_file: true, // Default to wave file
+            use_raw_audio: true, // Default to raw audio processing
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -246,7 +261,7 @@ fn main() {
         .add_systems(Update, quit_on_escape)
         .add_systems(EguiPrimaryContextPass, ui_example_system)
         .add_systems(Update, read_snooped_audio)
-        .add_systems(Update, prepare_my_material)
+        .add_systems(Update, prepare_my_material.after(read_snooped_audio))
         .run();
 }
 
@@ -390,6 +405,13 @@ fn ui_example_system(
                         ui.radio_value(&mut ui_state.use_wave_file, false, "Sine Wave");
                         ui.radio_value(&mut ui_state.use_wave_file, true, "Wave File");
                     });
+                    
+                    // Audio processing method selection
+                    ui.horizontal(|ui| {
+                        ui.label("Processing:");
+                        ui.radio_value(&mut ui_state.use_raw_audio, false, "FFT Frequency");
+                        ui.radio_value(&mut ui_state.use_raw_audio, true, "Raw Audio");
+                    });
 
                     if !ui_state.use_wave_file {
                         ui.add(egui::Slider::new(&mut ui_state.value, 20.0..=24000.0).text("Audio Frequency (Hz)"));
@@ -429,82 +451,113 @@ fn prepare_my_material(
     mut shader_data: ResMut<ShaderData>,
     sample_buffer: Res<SampleBuffer>,
     time: Res<Time>,
+    ui_state: Res<UiState>,
 ) {
-    // Process FFT data and update shader_data resource
+    // Process audio data and update shader_data resource
     
     // Debug: Log raw sample buffer data
-    println!("[MATERIAL] Sample buffer length: {}", sample_buffer.buffer.len());
+    trace!("Sample buffer length: {}", sample_buffer.buffer.len());
     if sample_buffer.buffer.len() > 0 {
         let sum: f32 = sample_buffer.buffer.iter().sum();
         let avg = sum / sample_buffer.buffer.len() as f32;
         let max = sample_buffer.buffer.iter().fold(f32::MIN, |a, &b| a.max(b));
         let min = sample_buffer.buffer.iter().fold(f32::MAX, |a, &b| a.min(b));
-        println!("[MATERIAL] Raw audio stats - Avg: {:.6}, Max: {:.6}, Min: {:.6}", avg, max, min);
+        trace!("Raw audio stats - Avg: {:.6}, Max: {:.6}, Min: {:.6}", avg, max, min);
     }
     
-    // Convert the buffer to Complex numbers and process with FFT.
-    let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+    let (bass_final, mid_final, treble_final) = if ui_state.use_raw_audio {
+        // Use raw audio data processing (simpler and more direct)
+        debug!("Using raw audio data processing");
         
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(complex_buffer.len());
-    fft.process(&mut complex_buffer);
-   
-    const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
-    const BASS_MAX_FREQ: f32 = 250.0;
-    const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
-    const MIDRANGE_MAX_FREQ: f32 = 4000.0;
-    const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
-    const TREBLE_MAX_FREQ: f32 = 20000.0;
-   
-    let mut bass_sum = 0.0;
-    let mut midrange_sum = 0.0;
-    let mut treble_sum = 0.0;
-    let mut bass_count = 0;
-    let mut midrange_count = 0;
-    let mut treble_count = 0;
-   
-    for (i, &result) in complex_buffer.iter().enumerate() {
-        // Calculate frequency in Hz
-        let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
-        let magnitude = result.norm();
-   
-        if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
-            bass_sum += magnitude;
-            bass_count += 1;
-        } else if frequency_in_hz >= MIDRANGE_MIN_FREQ && frequency_in_hz <= MIDRANGE_MAX_FREQ {
-            midrange_sum += magnitude;
-            midrange_count += 1;
-        } else if frequency_in_hz >= TREBLE_MIN_FREQ && frequency_in_hz <= TREBLE_MAX_FREQ {
-            treble_sum += magnitude;
-            treble_count += 1;
+        // Calculate simple statistics from raw audio samples
+        let sum: f32 = sample_buffer.buffer.iter().sum();
+        let avg = sum / sample_buffer.buffer.len() as f32;
+        let max = sample_buffer.buffer.iter().fold(f32::MIN, |a, &b| a.max(b));
+        let min = sample_buffer.buffer.iter().fold(f32::MAX, |a, &b| a.min(b));
+        
+        // Calculate a simple "energy" metric
+        let energy: f32 = sample_buffer.buffer.iter().map(|&x| x * x).sum();
+        let rms = (energy / sample_buffer.buffer.len() as f32).sqrt();
+        
+        // Map raw audio characteristics to RGB channels
+        // R: overall amplitude/energy
+        // G: dynamic range (max - min)
+        // B: average level
+        let r = (rms * 5.0).min(1.0);
+        let g = ((max - min) * 0.5).min(1.0);
+        let b = ((avg + 1.0) * 0.5).min(1.0); // Convert [-1,1] to [0,1]
+        
+        debug!("Raw audio mapping - R: {:.4}, G: {:.4}, B: {:.4}", r, g, b);
+        (r, g, b)
+    } else {
+        // Use FFT-based frequency analysis
+        debug!("Using FFT-based frequency analysis");
+        
+        // Convert the buffer to Complex numbers and process with FFT.
+        let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+            
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(complex_buffer.len());
+        fft.process(&mut complex_buffer);
+        
+        const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
+        const BASS_MAX_FREQ: f32 = 250.0;
+        const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
+        const MIDRANGE_MAX_FREQ: f32 = 4000.0;
+        const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
+        const TREBLE_MAX_FREQ: f32 = 20000.0;
+        
+        let mut bass_sum = 0.0;
+        let mut midrange_sum = 0.0;
+        let mut treble_sum = 0.0;
+        let mut bass_count = 0;
+        let mut midrange_count = 0;
+        let mut treble_count = 0;
+        
+        for (i, &result) in complex_buffer.iter().enumerate() {
+            // Calculate frequency in Hz
+            let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
+            let magnitude = result.norm();
+        
+            if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
+                bass_sum += magnitude;
+                bass_count += 1;
+            } else if frequency_in_hz >= MIDRANGE_MIN_FREQ && frequency_in_hz <= MIDRANGE_MAX_FREQ {
+                midrange_sum += magnitude;
+                midrange_count += 1;
+            } else if frequency_in_hz >= TREBLE_MIN_FREQ && frequency_in_hz <= TREBLE_MAX_FREQ {
+                treble_sum += magnitude;
+                treble_count += 1;
+            }
         }
-    }
-   
-    // Calculate averages and amplify significantly for visualization
-    let bass_avg = if bass_count > 0 { bass_sum / bass_count as f32 } else { 0.0 };
-    let mid_avg = if midrange_count > 0 { midrange_sum / midrange_count as f32 } else { 0.0 };
-    let treble_avg = if treble_count > 0 { treble_sum / treble_count as f32 } else { 0.0 };
-      
-    // More realistic amplification with proper scaling for real audio
-    // FFT magnitudes need to be scaled appropriately for the frequency ranges
-    let bass_amplified = (bass_avg * 50.0).min(1.0);
-    let mid_amplified = (mid_avg * 100.0).min(1.0);
-    let treble_amplified = (treble_avg * 200.0).min(1.0);
-     
-    // Apply logarithmic scaling for better visual response
-    let bass_final = (bass_amplified * 10.0).ln_1p() * 0.3;
-    let mid_final = (mid_amplified * 10.0).ln_1p() * 0.3;
-    let treble_final = (treble_amplified * 10.0).ln_1p() * 0.3;
-      
-    println!("[-] Enhanced Audio Data - Bass: {:.4} Mid: {:.4} Treble: {:.4}", bass_final, mid_final, treble_final);
-   
-    // Update the shader data resource with the processed FFT data and time
+        
+        // Calculate averages and amplify significantly for visualization
+        let bass_avg = if bass_count > 0 { bass_sum / bass_count as f32 } else { 0.0 };
+        let mid_avg = if midrange_count > 0 { midrange_sum / midrange_count as f32 } else { 0.0 };
+        let treble_avg = if treble_count > 0 { treble_sum / treble_count as f32 } else { 0.0 };
+           
+        // More realistic amplification with proper scaling for real audio
+        // FFT magnitudes need to be scaled appropriately for the frequency ranges
+        let bass_amplified = (bass_avg * 50.0).min(1.0);
+        let mid_amplified = (mid_avg * 100.0).min(1.0);
+        let treble_amplified = (treble_avg * 200.0).min(1.0);
+          
+        // Apply logarithmic scaling for better visual response
+        let bass_final = (bass_amplified * 10.0).ln_1p() * 0.3;
+        let mid_final = (mid_amplified * 10.0).ln_1p() * 0.3;
+        let treble_final = (treble_amplified * 10.0).ln_1p() * 0.3;
+           
+        debug!("FFT Audio Data - Bass: {:.4} Mid: {:.4} Treble: {:.4}", bass_final, mid_final, treble_final);
+        (bass_final, mid_final, treble_final)
+    };
+    
+    // Update the shader data resource with the processed data and time
     shader_data.r = bass_final;
     shader_data.g = mid_final;
     shader_data.b = treble_final;
     shader_data.time = time.elapsed_secs() as f32;
     shader_data.set_changed();
-        
+         
     // Update all materials to use the new shader data
     for (_, material) in material_assets.iter_mut() {
         material.uniforms = shader_data.clone();
@@ -542,7 +595,7 @@ fn read_snooped_audio(
     
     // Get samples from the snoop buffer
     let capacity = snoop_guard.capacity();
-    println!("[SNOOP] Snoop buffer capacity: {}", capacity);
+    trace!("Snoop buffer capacity: {}", capacity);
     
     for i in 0..capacity {
         let sample = snoop_guard.at(i);
@@ -555,7 +608,7 @@ fn read_snooped_audio(
     }
     
     // Log how many samples we actually got
-    println!("[SNOOP] Samples collected: {}", sample_buffer.buffer.len());
+    trace!("Samples collected: {}", sample_buffer.buffer.len());
     
     // If we don't have enough samples, pad with zeros
     while sample_buffer.buffer.len() < BUFFER_SIZE {
@@ -564,7 +617,7 @@ fn read_snooped_audio(
     
     // Log some sample values for debugging
     if sample_buffer.buffer.len() > 0 {
-        println!("[SNOOP] First few samples: {:?}", &sample_buffer.buffer[..std::cmp::min(5, sample_buffer.buffer.len())]);
+        trace!("First few samples: {:?}", &sample_buffer.buffer[..std::cmp::min(5, sample_buffer.buffer.len())]);
     }
 }
 
