@@ -17,19 +17,23 @@ use rustfft::{FftPlanner, num_complex::Complex};
 use bevy_fundsp::prelude::*;
 use uuid::Uuid;
 use bevy::time::Time;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use fundsp::wave::Wave;
+use fundsp::combinator::An;
 use hound::WavReader;
 
-// Define the play_sine function
-fn play_sine(frequency: Shared) -> impl AudioUnit {
-    // Create a sine wave with a variable frequency
-    var(&frequency) >> sine() >> split::<U2>() * 0.2
+// Define the play_sine function with audio capture
+fn play_sine(frequency: Shared, snoop_backend: An<fundsp::hacker32::SnoopBackend>) -> impl AudioUnit {
+    // Create a sine wave with a variable frequency and add snoop for audio capture
+    let audio = var(&frequency) >> sine();
+    let snooped_audio = audio >> snoop_backend;
+    snooped_audio.clone() | snooped_audio
 }
 
 // Custom DSP graph type
 struct SineWaveDsp {
     frequency: Shared,
+    snoop_backend: An<fundsp::hacker32::SnoopBackend>,
 }
 
 impl DspGraph for SineWaveDsp {
@@ -38,13 +42,14 @@ impl DspGraph for SineWaveDsp {
     }
 
     fn generate_graph(&self) -> Box<dyn AudioUnit> {
-        Box::new(play_sine(self.frequency.clone()))
+        Box::new(play_sine(self.frequency.clone(), self.snoop_backend.clone()))
     }
 }
 
 // Wave file DSP graph
 struct WaveFileDsp {
     wave_data: Arc<Wave>,
+    snoop_backend: An<fundsp::hacker32::SnoopBackend>,
 }
 
 impl DspGraph for WaveFileDsp {
@@ -54,8 +59,10 @@ impl DspGraph for WaveFileDsp {
 
     fn generate_graph(&self) -> Box<dyn AudioUnit> {
         let wave_data = self.wave_data.clone();
-        // Play back the first channel (channel 0) of the wave file
-        Box::new(wavech(&wave_data, 0, Some(0)))
+        // Play back the first channel (channel 0) of the wave file with snoop for audio capture
+        let audio = wavech(&wave_data, 0, Some(0));
+        let snooped_audio = audio >> self.snoop_backend.clone();
+        Box::new(snooped_audio.clone() | snooped_audio)
     }
 }
 
@@ -71,6 +78,12 @@ impl Default for AudioFrequency {
             value: shared(440.0),
         }
     }
+}
+
+// Resource to store the snoop receiver for audio capture
+#[derive(Resource)]
+struct AudioSnoop {
+    receiver: Arc<Mutex<fundsp::hacker::Snoop>>,
 }
 
 // Function to play the audio
@@ -125,7 +138,7 @@ fn update_audio_source(
     mut assets: ResMut<Assets<DspSource>>,
     dsp_manager: Res<DspManager>,
     mut current_audio_player: ResMut<CurrentAudioPlayer>,
-    audio_players: Query<Entity, With<AudioPlayer>>,
+    _audio_players: Query<Entity, With<AudioPlayer>>,
 ) {
     // Check if the audio source has changed
     if current_audio_player.current_source != ui_state.use_wave_file {
@@ -186,28 +199,36 @@ struct CurrentAudioPlayer {
 }
 
 
+
+
 fn main() {
     let frequency = shared(440.0);
     let frequency_clone = frequency.clone();
+    
+    // Create snoop nodes for audio capture
+    let (snoop_frontend, snoop_backend) = fundsp::hacker32::snoop(1024);
+    let snoop_receiver = Arc::new(Mutex::new(snoop_frontend));
     
     // Load wave file
     let wave_data = Arc::new(load_wave_file("assets/test.wav"));
     let wave_dsp = WaveFileDsp {
         wave_data: wave_data.clone(),
+        snoop_backend: snoop_backend.clone(),
     };
-    
+
     App::new()
         .init_resource::<Pause>()
         .init_resource::<UiState>()
         .init_resource::<SampleBuffer>()
         .init_resource::<CurrentAudioPlayer>()
         .insert_resource(AudioFrequency { value: frequency_clone })
+        .insert_resource(AudioSnoop { receiver: snoop_receiver })
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(ShaderData {
             r: 0.1,
             g: 0.1,
             b: 0.1,
-            _pad: 0.0,
+            time: 0.0,
         })
         .add_plugins((
             DefaultPlugins
@@ -216,7 +237,7 @@ fn main() {
         .add_plugins(MaterialPlugin::<CustomMaterial>::default())
         .add_plugins(EguiPlugin::default())
         .add_plugins(DspPlugin::new(44100.0))
-        .add_dsp_source(SineWaveDsp { frequency }, SourceType::Dynamic)
+        .add_dsp_source(SineWaveDsp { frequency, snoop_backend: snoop_backend.clone() }, SourceType::Dynamic)
         .add_dsp_source(wave_dsp, SourceType::Dynamic)
         .add_systems(Startup, setup_scene)
         .add_systems(PostStartup, play_audio)
@@ -224,8 +245,8 @@ fn main() {
         .add_systems(Update, update_audio_source.after(ui_example_system))
         .add_systems(Update, quit_on_escape)
         .add_systems(EguiPrimaryContextPass, ui_example_system)
+        .add_systems(Update, read_snooped_audio)
         .add_systems(Update, prepare_my_material)
-        .add_systems(Update, write_to_fft_buffer)
         .run();
 }
 
@@ -281,7 +302,7 @@ struct CustomMaterial {
 
 impl Material for CustomMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/haxor.wgsl".into()
+        "shaders/enhanced_audio_visualizer.wgsl".into()
     }
 }
 
@@ -290,7 +311,7 @@ struct ShaderData {
     r: f32,
     g: f32,
     b: f32,
-    _pad: f32,
+    time: f32,
 }
 
 impl Default for ShaderData {
@@ -299,7 +320,7 @@ impl Default for ShaderData {
             r: 0.1,
             g: 0.0,
             b: 0.0,
-            _pad: 0.0,
+            time: 0.0,
         }
     }
 }
@@ -310,8 +331,8 @@ fn setup_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut s_materials: ResMut<Assets<StandardMaterial>>,
     mut c_materials: ResMut<Assets<CustomMaterial>>,
-    mut shader_data: ResMut<ShaderData>,
-    asset_server: Res<AssetServer>,
+    _shader_data: ResMut<ShaderData>,
+    _asset_server: Res<AssetServer>,
 ) {
     // light
         commands.spawn((
@@ -334,7 +355,7 @@ fn setup_scene(
                 r: 1.0,
                 g: 0.0,
                 b: 0.0,
-                _pad: 0.0,
+                time: 0.0,
             },
         })),
         Transform::from_xyz(0.0, 0.5, 0.0),
@@ -406,36 +427,47 @@ fn ui_example_system(
 fn prepare_my_material(
     mut material_assets: ResMut<Assets<CustomMaterial>>,
     mut shader_data: ResMut<ShaderData>,
-    mut sample_buffer: ResMut<SampleBuffer>,
+    sample_buffer: Res<SampleBuffer>,
+    time: Res<Time>,
 ) {
     // Process FFT data and update shader_data resource
     
+    // Debug: Log raw sample buffer data
+    println!("[MATERIAL] Sample buffer length: {}", sample_buffer.buffer.len());
+    if sample_buffer.buffer.len() > 0 {
+        let sum: f32 = sample_buffer.buffer.iter().sum();
+        let avg = sum / sample_buffer.buffer.len() as f32;
+        let max = sample_buffer.buffer.iter().fold(f32::MIN, |a, &b| a.max(b));
+        let min = sample_buffer.buffer.iter().fold(f32::MAX, |a, &b| a.min(b));
+        println!("[MATERIAL] Raw audio stats - Avg: {:.6}, Max: {:.6}, Min: {:.6}", avg, max, min);
+    }
+    
     // Convert the buffer to Complex numbers and process with FFT.
     let mut complex_buffer: Vec<Complex<f32>> = sample_buffer.buffer.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
-     
+        
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(complex_buffer.len());
     fft.process(&mut complex_buffer);
- 
+   
     const BASS_MIN_FREQ: f32 = 20.0;    // Bass range
     const BASS_MAX_FREQ: f32 = 250.0;
     const MIDRANGE_MIN_FREQ: f32 = 250.0; // Midrange range
     const MIDRANGE_MAX_FREQ: f32 = 4000.0;
     const TREBLE_MIN_FREQ: f32 = 4000.0; // Treble range
     const TREBLE_MAX_FREQ: f32 = 20000.0;
- 
+   
     let mut bass_sum = 0.0;
     let mut midrange_sum = 0.0;
     let mut treble_sum = 0.0;
     let mut bass_count = 0;
     let mut midrange_count = 0;
     let mut treble_count = 0;
- 
+   
     for (i, &result) in complex_buffer.iter().enumerate() {
         // Calculate frequency in Hz
         let frequency_in_hz = (i as f32 * SAMPLE_RATE) / BUFFER_SIZE as f32;
         let magnitude = result.norm();
- 
+   
         if frequency_in_hz >= BASS_MIN_FREQ && frequency_in_hz <= BASS_MAX_FREQ {
             bass_sum += magnitude;
             bass_count += 1;
@@ -447,26 +479,32 @@ fn prepare_my_material(
             treble_count += 1;
         }
     }
- 
+   
     // Calculate averages and amplify significantly for visualization
     let bass_avg = if bass_count > 0 { bass_sum / bass_count as f32 } else { 0.0 };
     let mid_avg = if midrange_count > 0 { midrange_sum / midrange_count as f32 } else { 0.0 };
     let treble_avg = if treble_count > 0 { treble_sum / treble_count as f32 } else { 0.0 };
-    
-    // Amplify the values significantly - FFT magnitudes are typically very small
-    // and apply logarithmic scaling for better visual response
-    let bass_amplified = (bass_avg * 1000.0).ln_1p() * 0.1;
-    let mid_amplified = (mid_avg * 1000.0).ln_1p() * 0.1;
-    let treble_amplified = (treble_avg * 1000.0).ln_1p() * 0.1;
-    
-    //println!("[-] Bass: {:.6} Mid: {:.6} Treble: {:.6}", bass_amplified, mid_amplified, treble_amplified);
- 
-    // Update the shader data resource with the processed FFT data
-    shader_data.r = bass_amplified.clamp(0.0, 1.0);
-    shader_data.g = mid_amplified.clamp(0.0, 1.0);
-    shader_data.b = treble_amplified.clamp(0.0, 1.0);
-    shader_data.set_changed();
       
+    // More realistic amplification with proper scaling for real audio
+    // FFT magnitudes need to be scaled appropriately for the frequency ranges
+    let bass_amplified = (bass_avg * 50.0).min(1.0);
+    let mid_amplified = (mid_avg * 100.0).min(1.0);
+    let treble_amplified = (treble_avg * 200.0).min(1.0);
+     
+    // Apply logarithmic scaling for better visual response
+    let bass_final = (bass_amplified * 10.0).ln_1p() * 0.3;
+    let mid_final = (mid_amplified * 10.0).ln_1p() * 0.3;
+    let treble_final = (treble_amplified * 10.0).ln_1p() * 0.3;
+      
+    println!("[-] Enhanced Audio Data - Bass: {:.4} Mid: {:.4} Treble: {:.4}", bass_final, mid_final, treble_final);
+   
+    // Update the shader data resource with the processed FFT data and time
+    shader_data.r = bass_final;
+    shader_data.g = mid_final;
+    shader_data.b = treble_final;
+    shader_data.time = time.elapsed_secs() as f32;
+    shader_data.set_changed();
+        
     // Update all materials to use the new shader data
     for (_, material) in material_assets.iter_mut() {
         material.uniforms = shader_data.clone();
@@ -489,25 +527,44 @@ impl Default for SampleBuffer {
     }
 }
 
-fn write_to_fft_buffer(
+fn read_snooped_audio(
     mut sample_buffer: ResMut<SampleBuffer>,
-    ui_state: Res<UiState>,
-    time: Res<Time>,
+    audio_snoop: Res<AudioSnoop>,
 ) {
-    // Generate real audio samples from the current FundSP sine wave
-    // This creates samples that match what's actually being played
-    let current_frequency = ui_state.value;
-    let time_seconds = time.elapsed_secs();
-     
-    // Generate a sample from the current sine wave
-    let sample = (time_seconds * current_frequency * 2.0 * std::f32::consts::PI).sin() * 0.5;
-     
-    // Push the sample to the buffer
-    sample_buffer.buffer.push(sample);
-     
-    // Keep the buffer at a fixed size
-    if sample_buffer.buffer.len() > BUFFER_SIZE {
-        sample_buffer.buffer.remove(0);
+    // Read real audio data from the snoop receiver
+    let mut snoop_guard = audio_snoop.receiver.lock().unwrap();
+    
+    // Update the snoop to get the latest audio data
+    snoop_guard.update();
+    
+    // Clear the buffer and fill it with real audio data
+    sample_buffer.buffer.clear();
+    
+    // Get samples from the snoop buffer
+    let capacity = snoop_guard.capacity();
+    println!("[SNOOP] Snoop buffer capacity: {}", capacity);
+    
+    for i in 0..capacity {
+        let sample = snoop_guard.at(i);
+        sample_buffer.buffer.push(sample);
+        
+        // Keep the buffer at a fixed size
+        if sample_buffer.buffer.len() >= BUFFER_SIZE {
+            break;
+        }
+    }
+    
+    // Log how many samples we actually got
+    println!("[SNOOP] Samples collected: {}", sample_buffer.buffer.len());
+    
+    // If we don't have enough samples, pad with zeros
+    while sample_buffer.buffer.len() < BUFFER_SIZE {
+        sample_buffer.buffer.push(0.0);
+    }
+    
+    // Log some sample values for debugging
+    if sample_buffer.buffer.len() > 0 {
+        println!("[SNOOP] First few samples: {:?}", &sample_buffer.buffer[..std::cmp::min(5, sample_buffer.buffer.len())]);
     }
 }
 
