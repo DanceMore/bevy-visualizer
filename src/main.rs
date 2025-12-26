@@ -17,9 +17,12 @@ use rustfft::{FftPlanner, num_complex::Complex};
 use bevy_fundsp::prelude::*;
 use uuid::Uuid;
 use bevy::time::Time;
+use std::sync::Arc;
+use fundsp::wave::Wave;
+use hound::WavReader;
 
-// Define the play_wav function
-fn play_wav(frequency: Shared) -> impl AudioUnit {
+// Define the play_sine function
+fn play_sine(frequency: Shared) -> impl AudioUnit {
     // Create a sine wave with a variable frequency
     var(&frequency) >> sine() >> split::<U2>() * 0.2
 }
@@ -35,7 +38,24 @@ impl DspGraph for SineWaveDsp {
     }
 
     fn generate_graph(&self) -> Box<dyn AudioUnit> {
-        Box::new(play_wav(self.frequency.clone()))
+        Box::new(play_sine(self.frequency.clone()))
+    }
+}
+
+// Wave file DSP graph
+struct WaveFileDsp {
+    wave_data: Arc<Wave>,
+}
+
+impl DspGraph for WaveFileDsp {
+    fn id(&self) -> Uuid {
+        Uuid::from_u128(0xfedcba0987654321fedcba0987654321u128)
+    }
+
+    fn generate_graph(&self) -> Box<dyn AudioUnit> {
+        let wave_data = self.wave_data.clone();
+        // Play back the first channel (channel 0) of the wave file
+        Box::new(wavech(&wave_data, 0, Some(0)))
     }
 }
 
@@ -58,15 +78,35 @@ fn play_audio(
     mut commands: Commands,
     mut assets: ResMut<Assets<DspSource>>,
     dsp_manager: Res<DspManager>,
+    ui_state: Res<UiState>,
+    mut current_audio_player: ResMut<CurrentAudioPlayer>,
 ) {
-    let source = assets.add(
-        dsp_manager
-            .get_graph_by_id(&Uuid::from_u128(0x1234567890abcdef1234567890abcdefu128))
-            .unwrap_or_else(|| panic!("DSP source not found!")),
-    );
-    commands.spawn(AudioPlayer {
+    println!("[AUDIO] Playing audio with source: {}", if ui_state.use_wave_file { "Wave File" } else { "Sine Wave" });
+    
+    let source = if ui_state.use_wave_file {
+        // Use wave file DSP
+        println!("[AUDIO] Creating wave file audio source");
+        assets.add(
+            dsp_manager
+                .get_graph_by_id(&Uuid::from_u128(0xfedcba0987654321fedcba0987654321u128))
+                .unwrap_or_else(|| panic!("Wave file DSP source not found!")),
+        )
+    } else {
+        // Use sine wave DSP
+        println!("[AUDIO] Creating sine wave audio source");
+        assets.add(
+            dsp_manager
+                .get_graph_by_id(&Uuid::from_u128(0x1234567890abcdef1234567890abcdefu128))
+                .unwrap_or_else(|| panic!("Sine wave DSP source not found!")),
+        )
+    };
+    
+    let entity = commands.spawn(AudioPlayer {
         0: source
-    });
+    }).id();
+    
+    current_audio_player.entity = Some(entity);
+    current_audio_player.current_source = ui_state.use_wave_file;
 }
 
 // System to update the audio frequency from the UI
@@ -78,6 +118,54 @@ fn update_audio_frequency(
     frequency.value.set_value(ui_state.value);
 }
 
+// System to handle audio source switching
+fn update_audio_source(
+    ui_state: Res<UiState>,
+    mut commands: Commands,
+    mut assets: ResMut<Assets<DspSource>>,
+    dsp_manager: Res<DspManager>,
+    mut current_audio_player: ResMut<CurrentAudioPlayer>,
+    audio_players: Query<Entity, With<AudioPlayer>>,
+) {
+    // Check if the audio source has changed
+    if current_audio_player.current_source != ui_state.use_wave_file {
+        println!("[AUDIO] Switching audio source to: {}", if ui_state.use_wave_file { "Wave File" } else { "Sine Wave" });
+        
+        // Despawn the current audio player
+        if let Some(entity) = current_audio_player.entity {
+            commands.entity(entity).despawn();
+        }
+        
+        // Create a new audio source based on the selection
+        let source = if ui_state.use_wave_file {
+            // Use wave file DSP
+            println!("[AUDIO] Creating wave file audio source");
+            assets.add(
+                dsp_manager
+                    .get_graph_by_id(&Uuid::from_u128(0xfedcba0987654321fedcba0987654321u128))
+                    .unwrap_or_else(|| panic!("Wave file DSP source not found!")),
+            )
+        } else {
+            // Use sine wave DSP
+            println!("[AUDIO] Creating sine wave audio source");
+            assets.add(
+                dsp_manager
+                    .get_graph_by_id(&Uuid::from_u128(0x1234567890abcdef1234567890abcdefu128))
+                    .unwrap_or_else(|| panic!("Sine wave DSP source not found!")),
+            )
+        };
+        
+        // Spawn a new audio player with the selected source
+        let new_entity = commands.spawn(AudioPlayer {
+            0: source
+        }).id();
+        
+        // Update the current audio player resource
+        current_audio_player.entity = Some(new_entity);
+        current_audio_player.current_source = ui_state.use_wave_file;
+    }
+}
+
 // I'm coming back to put more state here
 #[allow(dead_code)]
 #[derive(Resource, Default)]
@@ -85,19 +173,34 @@ struct UiState {
     pub label: String,
     pub value: f32,
     pub loaded_wav: bool,
+    pub use_wave_file: bool,
 }
 
 #[derive(Resource, Default)]
 struct Pause(bool);
 
+#[derive(Resource, Default)]
+struct CurrentAudioPlayer {
+    entity: Option<Entity>,
+    current_source: bool, // true = wave file, false = sine wave
+}
+
+
 fn main() {
     let frequency = shared(440.0);
     let frequency_clone = frequency.clone();
+    
+    // Load wave file
+    let wave_data = Arc::new(load_wave_file("assets/test.wav"));
+    let wave_dsp = WaveFileDsp {
+        wave_data: wave_data.clone(),
+    };
     
     App::new()
         .init_resource::<Pause>()
         .init_resource::<UiState>()
         .init_resource::<SampleBuffer>()
+        .init_resource::<CurrentAudioPlayer>()
         .insert_resource(AudioFrequency { value: frequency_clone })
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(ShaderData {
@@ -112,16 +215,54 @@ fn main() {
         ))
         .add_plugins(MaterialPlugin::<CustomMaterial>::default())
         .add_plugins(EguiPlugin::default())
-        .add_plugins(DspPlugin::default())
+        .add_plugins(DspPlugin::new(44100.0))
         .add_dsp_source(SineWaveDsp { frequency }, SourceType::Dynamic)
+        .add_dsp_source(wave_dsp, SourceType::Dynamic)
         .add_systems(Startup, setup_scene)
         .add_systems(PostStartup, play_audio)
         .add_systems(Update, update_audio_frequency.after(ui_example_system))
+        .add_systems(Update, update_audio_source.after(ui_example_system))
         .add_systems(Update, quit_on_escape)
         .add_systems(EguiPrimaryContextPass, ui_example_system)
         .add_systems(Update, prepare_my_material)
         .add_systems(Update, write_to_fft_buffer)
         .run();
+}
+
+fn load_wave_file(path: &str) -> Wave {
+    let reader = WavReader::open(path).expect("Failed to open WAV file");
+    let spec = reader.spec();
+    
+    println!("[WAV] File properties: {} channels, {} Hz sample rate",
+             spec.channels, spec.sample_rate);
+    
+    let samples = reader
+        .into_samples::<i16>()
+        .filter_map(|s| s.ok())
+        .map(|sample| sample as f32 / 32768.0) // Convert i16 to f32 in range [-1, 1]
+        .collect::<Vec<f32>>();
+    
+    println!("[WAV] Loaded {} samples", samples.len());
+    
+    let num_channels = spec.channels as usize;
+    let num_samples = samples.len() / num_channels;
+    
+    let mut wavefile = Wave::with_capacity(
+        num_channels,
+        spec.sample_rate as f64,
+        num_samples,
+    );
+    
+    wavefile.resize(num_samples);
+    
+    for channel in 0..num_channels {
+        for pos in 0..num_samples {
+            let sample = samples[pos * num_channels + channel];
+            wavefile.set(channel, pos, sample);
+        }
+    }
+    
+    wavefile
 }
 
 fn quit_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit_messages: ResMut<Messages<AppExit>>) {
@@ -214,7 +355,7 @@ fn ui_example_system(
 ) {
     // Safely access the egui context with proper error handling
     let ctx_result = contexts.ctx_mut();
-     
+      
     match ctx_result {
         Ok(ctx) => {
             egui::SidePanel::left("side_panel")
@@ -222,10 +363,21 @@ fn ui_example_system(
                 .show(ctx, |ui| {
                     ui.heading("Side Panel");
 
-                    ui.add(egui::Slider::new(&mut ui_state.value, 20.0..=24000.0).text("Audio Frequency (Hz)"));
-                    ui.label(format!("Current Frequency: {:.1} Hz", ui_state.value));
-                    if ui.button("Increment").clicked() {
-                        ui_state.value += 1.0;
+                    // Audio source selection
+                    ui.horizontal(|ui| {
+                        ui.label("Audio Source:");
+                        ui.radio_value(&mut ui_state.use_wave_file, false, "Sine Wave");
+                        ui.radio_value(&mut ui_state.use_wave_file, true, "Wave File");
+                    });
+
+                    if !ui_state.use_wave_file {
+                        ui.add(egui::Slider::new(&mut ui_state.value, 20.0..=24000.0).text("Audio Frequency (Hz)"));
+                        ui.label(format!("Current Frequency: {:.1} Hz", ui_state.value));
+                        if ui.button("Increment").clicked() {
+                            ui_state.value += 1.0;
+                        }
+                    } else {
+                        ui.label("Playing: test.wav (44100 Hz)");
                     }
 
                     // these used to be plumbed directly to the shader data
@@ -233,7 +385,7 @@ fn ui_example_system(
                     let r_changed = ui.add(egui::Slider::new(&mut shader_data.r, 0.0..=1.0).text("Red")).changed();
                     let g_changed = ui.add(egui::Slider::new(&mut shader_data.g, 0.0..=1.0).text("Green")).changed();
                     let b_changed = ui.add(egui::Slider::new(&mut shader_data.b, 0.0..=1.0).text("Blue")).changed();
-                    
+                     
                     // Manually trigger change detection if any slider changed
                     if r_changed || g_changed || b_changed {
                         shader_data.set_changed();
@@ -307,7 +459,7 @@ fn prepare_my_material(
     let mid_amplified = (mid_avg * 1000.0).ln_1p() * 0.1;
     let treble_amplified = (treble_avg * 1000.0).ln_1p() * 0.1;
     
-    println!("[-] Bass: {:.6} Mid: {:.6} Treble: {:.6}", bass_amplified, mid_amplified, treble_amplified);
+    //println!("[-] Bass: {:.6} Mid: {:.6} Treble: {:.6}", bass_amplified, mid_amplified, treble_amplified);
  
     // Update the shader data resource with the processed FFT data
     shader_data.r = bass_amplified.clamp(0.0, 1.0);

@@ -1583,6 +1583,7 @@ dependencies = [
  "bevy_embedded_assets",
  "bevy_fundsp",
  "fundsp",
+ "hound",
  "num-complex",
  "rand 0.8.5",
  "rustfft",
