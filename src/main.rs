@@ -248,6 +248,9 @@ fn main() {
             b: 0.1,
             time: 0.0,
         })
+        .add_plugins(bevy_embedded_assets::EmbeddedAssetPlugin {
+            mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
+        })
         .add_plugins((
             DefaultPlugins
                 .build(),
@@ -269,39 +272,86 @@ fn main() {
 }
 
 fn load_wave_file(path: &str) -> Wave {
-    let reader = WavReader::open(path).expect("Failed to open WAV file");
-    let spec = reader.spec();
-    
-    println!("[WAV] File properties: {} channels, {} Hz sample rate",
-             spec.channels, spec.sample_rate);
-    
-    let samples = reader
-        .into_samples::<i16>()
-        .filter_map(|s| s.ok())
-        .map(|sample| sample as f32 / 32768.0) // Convert i16 to f32 in range [-1, 1]
-        .collect::<Vec<f32>>();
-    
-    println!("[WAV] Loaded {} samples", samples.len());
-    
-    let num_channels = spec.channels as usize;
-    let num_samples = samples.len() / num_channels;
-    
-    let mut wavefile = Wave::with_capacity(
-        num_channels,
-        spec.sample_rate as f64,
-        num_samples,
-    );
-    
-    wavefile.resize(num_samples);
-    
-    for channel in 0..num_channels {
-        for pos in 0..num_samples {
-            let sample = samples[pos * num_channels + channel];
-            wavefile.set(channel, pos, sample);
+    // For WASM, we need to use the embedded asset system
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Load the embedded asset as bytes
+        let asset_bytes = include_bytes!(path);
+        
+        // Parse the WAV data from bytes
+        let cursor = std::io::Cursor::new(asset_bytes);
+        let reader = WavReader::new(cursor).expect("Failed to parse WAV data");
+        let spec = reader.spec();
+        
+        println!("[WAV] File properties: {} channels, {} Hz sample rate",
+                 spec.channels, spec.sample_rate);
+        
+        let samples = reader
+            .into_samples::<i16>()
+            .filter_map(|s| s.ok())
+            .map(|sample| sample as f32 / 32768.0) // Convert i16 to f32 in range [-1, 1]
+            .collect::<Vec<f32>>();
+        
+        println!("[WAV] Loaded {} samples", samples.len());
+        
+        let num_channels = spec.channels as usize;
+        let num_samples = samples.len() / num_channels;
+        
+        let mut wavefile = Wave::with_capacity(
+            num_channels,
+            spec.sample_rate as f64,
+            num_samples,
+        );
+        
+        wavefile.resize(num_samples);
+        
+        for channel in 0..num_channels {
+            for pos in 0..num_samples {
+                let sample = samples[pos * num_channels + channel];
+                wavefile.set(channel, pos, sample);
+            }
         }
+        
+        wavefile
     }
     
-    wavefile
+    // For native builds, use the original file system approach
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let reader = WavReader::open(path).expect("Failed to open WAV file");
+        let spec = reader.spec();
+        
+        println!("[WAV] File properties: {} channels, {} Hz sample rate",
+                 spec.channels, spec.sample_rate);
+        
+        let samples = reader
+            .into_samples::<i16>()
+            .filter_map(|s| s.ok())
+            .map(|sample| sample as f32 / 32768.0) // Convert i16 to f32 in range [-1, 1]
+            .collect::<Vec<f32>>();
+        
+        println!("[WAV] Loaded {} samples", samples.len());
+        
+        let num_channels = spec.channels as usize;
+        let num_samples = samples.len() / num_channels;
+        
+        let mut wavefile = Wave::with_capacity(
+            num_channels,
+            spec.sample_rate as f64,
+            num_samples,
+        );
+        
+        wavefile.resize(num_samples);
+        
+        for channel in 0..num_channels {
+            for pos in 0..num_samples {
+                let sample = samples[pos * num_channels + channel];
+                wavefile.set(channel, pos, sample);
+            }
+        }
+        
+        wavefile
+    }
 }
 
 fn quit_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit_messages: ResMut<Messages<AppExit>>) {

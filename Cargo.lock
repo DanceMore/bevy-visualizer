@@ -1582,6 +1582,7 @@ dependencies = [
  "bevy_egui",
  "bevy_embedded_assets",
  "bevy_fundsp",
+ "console_error_panic_hook",
  "fundsp",
  "getrandom 0.2.16",
  "hound",
