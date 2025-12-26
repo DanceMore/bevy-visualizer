@@ -271,10 +271,16 @@ fn main() {
         .run();
 }
 
-fn load_wave_file(_path: &str) -> Wave {
+fn load_wave_file(path: &str) -> Wave {
     // For WASM, we need to use the embedded asset system
     #[cfg(target_arch = "wasm32")]
     {
+        // Suppress unused variable warning for WASM build
+        #[allow(unused_variables)]
+        {
+            path;
+        }
+        
         // Load the embedded asset as bytes using include_bytes! with a literal path
         let asset_bytes = include_bytes!("../assets/test.wav");
         
