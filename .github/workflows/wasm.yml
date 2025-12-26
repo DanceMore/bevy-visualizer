@@ -36,7 +36,6 @@ jobs:
       - name: Copy WASM files to docs
         run: |
           cp target/wasm32-unknown-unknown/release/bevy_visualizer.wasm ./docs/
-          cp target/wasm32-unknown-unknown/release/bevy_visualizer_bg.wasm ./docs/
 
       - name: Commit and Push Changes
         run: |
