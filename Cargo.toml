@@ -16,6 +16,7 @@ rand = "0.8.5"
 rustfft = "6.1.0"
 uuid = "1.4.1"
 hound = "3.5.1"
+getrandom = { version = "0.2.16", features = ["js"] }
 
 # from https://bevy-cheatbook.github.io/pitfalls/performance.html
 # Enable max optimizations for dependencies, but not for our code:

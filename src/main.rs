@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use bevy::log::{debug, trace};
+use bevy::log::{debug, trace, info};
 
 use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
