@@ -20,7 +20,15 @@
         import init from './bevy_visualizer.js';
 
         async function run() {
-            await init();
+            try {
+                console.log("Starting WASM initialization...");
+                await init();
+                console.log("WASM initialization completed successfully.");
+            } catch (error) {
+                console.error("Failed to initialize WASM:", error);
+                console.error("Error stack:", error.stack);
+                alert("Failed to initialize WASM. See console for details.");
+            }
         }
 
         // Add an event listener to run WebAssembly code when the button is clicked

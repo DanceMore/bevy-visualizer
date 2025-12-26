@@ -217,6 +217,9 @@ struct CurrentAudioPlayer {
 
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+
     let frequency = shared(440.0);
     let frequency_clone = frequency.clone();
     
