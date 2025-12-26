@@ -98,7 +98,7 @@ fn play_audio(
     asset_loading_state: Res<AssetLoadingState>,
 ) {
     // Check if all assets are loaded
-    if !asset_loading_state.wasm_loaded || !asset_loading_state.wav_loaded {
+    if !asset_loading_state.assets_loaded {
         println!("[AUDIO] Waiting for assets to load...");
         return;
     }
@@ -224,6 +224,7 @@ struct CurrentAudioPlayer {
 struct AssetLoadingState {
     wasm_loaded: bool,
     wav_loaded: bool,
+    assets_loaded: bool,
 }
 
 
@@ -402,6 +403,12 @@ fn check_asset_loading(
         // In a real application, you would check the actual loading state
         asset_loading_state.wav_loaded = true;
         println!("[ASSET] WAV file loaded");
+    }
+    
+    // Check if all assets are loaded
+    if asset_loading_state.wasm_loaded && asset_loading_state.wav_loaded {
+        asset_loading_state.assets_loaded = true;
+        println!("[ASSET] All assets loaded");
     }
 }
 
