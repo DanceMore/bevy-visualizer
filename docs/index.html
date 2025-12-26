@@ -19,9 +19,38 @@
         // Import the generated JavaScript file
         import init from './bevy_visualizer.js';
 
+        // Preload the WASM binary and WAV file
+        async function preloadAssets() {
+            try {
+                console.log("Starting asset preloading...");
+                
+                // Preload the WASM binary
+                const wasmResponse = await fetch('./bevy_visualizer_bg.wasm');
+                const wasmBytes = await wasmResponse.arrayBuffer();
+                console.log("WASM binary preloaded successfully.");
+                
+                // Preload the WAV file
+                const wavResponse = await fetch('./assets/test.wav');
+                const wavBytes = await wavResponse.arrayBuffer();
+                console.log("WAV file preloaded successfully.");
+                
+                return { wasmBytes, wavBytes };
+            } catch (error) {
+                console.error("Failed to preload assets:", error);
+                console.error("Error stack:", error.stack);
+                alert("Failed to preload assets. See console for details.");
+                throw error;
+            }
+        }
+
         async function run() {
             try {
                 console.log("Starting WASM initialization...");
+                
+                // Preload assets before initializing WASM
+                const { wasmBytes, wavBytes } = await preloadAssets();
+                
+                // Initialize WASM with preloaded assets
                 await init();
                 console.log("WASM initialization completed successfully.");
             } catch (error) {

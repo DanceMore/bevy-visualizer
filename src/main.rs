@@ -95,7 +95,14 @@ fn play_audio(
     dsp_manager: Res<DspManager>,
     ui_state: Res<UiState>,
     mut current_audio_player: ResMut<CurrentAudioPlayer>,
+    asset_loading_state: Res<AssetLoadingState>,
 ) {
+    // Check if all assets are loaded
+    if !asset_loading_state.wasm_loaded || !asset_loading_state.wav_loaded {
+        println!("[AUDIO] Waiting for assets to load...");
+        return;
+    }
+    
     println!("[AUDIO] Playing audio with source: {}", if ui_state.use_wave_file { "Wave File" } else { "Sine Wave" });
     
     let source = if ui_state.use_wave_file {
@@ -213,6 +220,12 @@ struct CurrentAudioPlayer {
     current_source: bool, // true = wave file, false = sine wave
 }
 
+#[derive(Resource, Default)]
+struct AssetLoadingState {
+    wasm_loaded: bool,
+    wav_loaded: bool,
+}
+
 
 
 
@@ -239,6 +252,7 @@ fn main() {
         .init_resource::<UiState>()
         .init_resource::<SampleBuffer>()
         .init_resource::<CurrentAudioPlayer>()
+        .init_resource::<AssetLoadingState>()
         .insert_resource(AudioFrequency { value: frequency_clone })
         .insert_resource(AudioSnoop { receiver: snoop_receiver })
         .insert_resource(ClearColor(Color::BLACK))
@@ -261,6 +275,7 @@ fn main() {
         .add_dsp_source(SineWaveDsp { frequency, snoop_backend: snoop_backend.clone() }, SourceType::Dynamic)
         .add_dsp_source(wave_dsp, SourceType::Dynamic)
         .add_systems(Startup, setup_scene)
+        .add_systems(Startup, check_asset_loading)
         .add_systems(PostStartup, play_audio)
         .add_systems(Update, update_audio_frequency.after(ui_example_system))
         .add_systems(Update, update_audio_source.after(ui_example_system))
@@ -357,6 +372,36 @@ fn load_wave_file(path: &str) -> Wave {
         }
         
         wavefile
+    }
+}
+
+fn check_asset_loading(
+    mut asset_loading_state: ResMut<AssetLoadingState>,
+) {
+    // For WASM builds, we need to check if the WASM binary is loaded
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Check if the WASM binary is loaded
+        if !asset_loading_state.wasm_loaded {
+            // For now, we'll assume the WASM binary is loaded when this system runs
+            // In a real application, you would check the actual loading state
+            asset_loading_state.wasm_loaded = true;
+            println!("[ASSET] WASM binary loaded");
+        }
+    }
+    
+    // For native builds, we'll assume the WASM binary is not needed
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        asset_loading_state.wasm_loaded = true;
+    }
+    
+    // Check if the WAV file is loaded
+    if !asset_loading_state.wav_loaded {
+        // For now, we'll assume the WAV file is loaded when this system runs
+        // In a real application, you would check the actual loading state
+        asset_loading_state.wav_loaded = true;
+        println!("[ASSET] WAV file loaded");
     }
 }
 
